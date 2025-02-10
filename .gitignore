@@ -11,8 +11,9 @@ venv/
 
 # MicroPython
 .micropythonrc
-
+.micropic*
 # VS Code
 .vscode/
 .DS_Store
+
 EOL
