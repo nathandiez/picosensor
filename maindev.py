@@ -5,14 +5,14 @@ from bme280 import BME280
 SWITCHPIN = 15
 MOTIONPIN = 16
 
+SCLPIN = 5
+SDAPIN = 4
+
 print("Starting up...")
 
-i2c = machine.I2C(0, scl=machine.Pin(5), sda=machine.Pin(4))
-
-# Initialize GPIO 16 as input
-gpiomotion = machine.Pin(MOTIONPIN, machine.Pin.IN, machine.Pin.PULL_DOWN)       # motion detection
-gpioswitch = machine.Pin(SWITCHPIN, machine.Pin.IN, machine.Pin.PULL_UP)     # general purpose IO monitoring
-
+i2c = machine.I2C(0, scl=machine.Pin(SCLPIN), sda=machine.Pin(SDAPIN))
+motion_pin = machine.Pin(MOTIONPIN, machine.Pin.IN, machine.Pin.PULL_DOWN)       # motion detection
+switch_pin = machine.Pin(SWITCHPIN, machine.Pin.IN, machine.Pin.PULL_UP)     # general purpose IO monitoring
 sensor = BME280(i2c=i2c)
 
 # Continuously read and print sensor values
@@ -21,15 +21,15 @@ while True:
     temperature_f, humidity, pressure_inhg = sensor.values
     
     # Read GPIO 16 state
-    switch_pin = "HIGH" if gpioswitch.value() == 1 else "LOW"
-    motion_pin = "HIGH" if gpiomotion.value() == 1 else "LOW"
+    switch_state = "HIGH" if switch_pin.value() == 1 else "LOW"
+    motion_state = "MOTION!" if motion_pin.value() == 1 else "none"
 
 
     print(f"Temperature: {temperature_f:.2f} F")
     print(f"Pressure: {pressure_inhg:.2f} in Hg")
     print(f"Humidity: {humidity:.2f} %")
-    print(f"Switch Pin: {switch_pin}")
-    print(f"Motion Pin: {motion_pin}")
+    print(f"Switch: {switch_state}")
+    print(f"Motion: {motion_state}")
 
     print("--------------------------")
     
