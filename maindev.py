@@ -2,14 +2,14 @@ import machine
 import time
 from bme280 import BME280
 import network
-from umqtt.simple import MQTTClient
+from lib.umqtt.simple import MQTTClient
 
 # Constants
 SWITCHPIN = 15
 MOTIONPIN = 16
 SCLPIN = 5
 SDAPIN = 4
-MQTT_BROKER = "localhost"  # Replace with the IP of your Mosquitto broker if needed
+MQTT_BROKER = "192.168.5.204"  # Replace with the IP of your Mosquitto broker if needed
 MQTT_PORT = 1883
 MQTT_TOPIC = "sensor/reading"
 
