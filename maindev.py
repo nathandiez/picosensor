@@ -10,9 +10,22 @@ SDAPIN = 4
 
 print("Starting up...")
 
+id0_pin = machine.Pin(0, machine.Pin.IN, machine.Pin.PULL_DOWN)    
+id1_pin = machine.Pin(1, machine.Pin.IN, machine.Pin.PULL_DOWN)       
+id2_pin = machine.Pin(2, machine.Pin.IN, machine.Pin.PULL_DOWN)       
+
+p0_value = id0_pin.value()
+p1_value = id1_pin.value()
+p2_value = id2_pin.value()
+
+# Assuming p0_value is the least significant bit (LSB)
+device_id = "pdevice" + str((p2_value << 2) | (p1_value << 1) | p0_value)
+
+print("device_id:", device_id)
+
 i2c = machine.I2C(0, scl=machine.Pin(SCLPIN), sda=machine.Pin(SDAPIN))
 motion_pin = machine.Pin(MOTIONPIN, machine.Pin.IN, machine.Pin.PULL_DOWN)       # motion detection
-switch_pin = machine.Pin(SWITCHPIN, machine.Pin.IN, machine.Pin.PULL_UP)     # general purpose IO monitoring
+switch_pin = machine.Pin(SWITCHPIN, machine.Pin.IN, machine.Pin.PULL_DOWN)     # general purpose IO monitoring
 sensor = BME280(i2c=i2c)
 
 # Continuously read and print sensor values
