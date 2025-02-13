@@ -9,23 +9,23 @@ SWITCHPIN = 15
 MOTIONPIN = 16
 SCLPIN = 5
 SDAPIN = 4
-MQTT_BROKER = "192.168.5.204"  # Replace with the IP of your Mosquitto broker if needed
+MQTT_BROKER = "35.196.170.92"  # Replace with the IP of your Mosquitto broker if needed
 MQTT_PORT = 1883
 MQTT_TOPIC = "sensor/reading"
 
 print("Starting up...")
 
-# Set up GPIO
-id0_pin = machine.Pin(0, machine.Pin.IN, machine.Pin.PULL_DOWN)    
-id1_pin = machine.Pin(1, machine.Pin.IN, machine.Pin.PULL_DOWN)       
-id2_pin = machine.Pin(2, machine.Pin.IN, machine.Pin.PULL_DOWN)       
+# Get device ID from filesystem
+def get_device_id():
+    try:
+        with open('device_id.txt', 'r') as f:
+            device_id = f.read().strip()
+            return device_id
+    except OSError:
+        print("Warning: No device ID found! Please run set_deviceid.py first")
+        return "pdevice_unknown"  # Fallback ID
 
-# Get device ID
-p0_value = id0_pin.value()
-p1_value = id1_pin.value()
-p2_value = id2_pin.value()
-device_id = "pdevice" + str((p2_value << 2) | (p1_value << 1) | p0_value)
-
+device_id = get_device_id()
 print("device_id:", device_id)
 
 # Set up I2C and sensor
@@ -52,7 +52,9 @@ def mqtt_connect():
 # Main loop
 def main():
     # Connect to Wi-Fi and MQTT
+    print("about to connect to wifi")
     connect_wifi()
+    print("about to connect to mqtt")
     mqtt_client = mqtt_connect()
 
     # Continuously read and publish sensor values
