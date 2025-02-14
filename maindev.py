@@ -9,7 +9,7 @@ SWITCHPIN = 15
 MOTIONPIN = 16
 SCLPIN = 5
 SDAPIN = 4
-MQTT_BROKER = "35.196.170.92"  # Replace with the IP of your Mosquitto broker if needed
+MQTT_BROKER = "35.185.14.240"  # Replace with the IP of your Mosquitto broker if needed
 MQTT_PORT = 1883
 MQTT_TOPIC = "sensor/reading"
 
