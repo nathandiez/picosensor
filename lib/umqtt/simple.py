@@ -1,16 +1,16 @@
+# lib/umqtt/simple.py
+
 import usocket as socket
 import ustruct as struct
 from ubinascii import hexlify
 import time
 
- 
-RESPONSE_TIMEOUT = 120 # wait time in 0.5 seconds for SUBACK or PUBACK (with QoS=1)
+RESPONSE_TIMEOUT = 120
 
 class MQTTException(Exception):
     pass
 
 class MQTTClient:
-
     def __init__(self, client_id, server, port=0, user=None, password=None, keepalive=0,
                  ssl=False, ssl_params={}):
         if port == 0:
@@ -65,7 +65,6 @@ class MQTTClient:
             self.sock = ussl.wrap_socket(self.sock, **self.ssl_params)
         premsg = bytearray(b"\x10\0\0\0\0\0")
         msg = bytearray(b"\x04MQTT\x04\x02\0\0")
-
         sz = 10 + 2 + len(self.client_id)
         msg[6] = clean_session << 1
         if self.user is not None:
@@ -89,7 +88,6 @@ class MQTTClient:
 
         self.sock.write(premsg, i + 2)
         self.sock.write(msg)
-        #print(hex(len(msg)), hexlify(msg, ":"))
         self._send_str(self.client_id)
         if self.lw_topic:
             self._send_str(self.lw_topic)
@@ -123,7 +121,6 @@ class MQTTClient:
             sz >>= 7
             i += 1
         pkt[i] = sz
-        #print(hex(len(pkt)), hexlify(pkt, ":"))
         self.sock.write(pkt, i + 1)
         self._send_str(topic)
         if qos > 0:
@@ -134,8 +131,8 @@ class MQTTClient:
         self.sock.write(msg)
         if qos == 1:
             counter = 0
-            while counter < RESPONSE_TIMEOUT:   #added TIMEOUT raises exception -1 if no PUBACACK in time           
-                op = self.check_msg()           #there is possibility to make subsequent calls to callback function if we receive new commands before receiving PUBACK,so we use a lock variable in main.py to avoid subsequent calls to callback from wait_msg
+            while counter < RESPONSE_TIMEOUT:
+                op = self.check_msg()
                 if op == 0x40:
                     sz = self.sock.read(1)
                     assert sz == b"\x02"
@@ -143,7 +140,7 @@ class MQTTClient:
                     rcv_pid = rcv_pid[0] << 8 | rcv_pid[1]
                     if pid == rcv_pid:
                         return
-                counter = counter + 1
+                counter += 1
                 time.sleep(0.5)
             raise MQTTException(-1)
         elif qos == 2:
@@ -154,29 +151,22 @@ class MQTTClient:
         pkt = bytearray(b"\x82\0\0\0")
         self.pid += 1
         struct.pack_into("!BH", pkt, 1, 2 + 2 + len(topic) + 1, self.pid)
-        #print(hex(len(pkt)), hexlify(pkt, ":"))
         self.sock.write(pkt)
         self._send_str(topic)
         self.sock.write(qos.to_bytes(1, "little"))
         counter = 0
-        while counter < RESPONSE_TIMEOUT : #added TIMEOUT raises exception -1 if no SUBACK in time
-            
+        while counter < RESPONSE_TIMEOUT:
             op = self.check_msg()
             if op == 0x90:
                 resp = self.sock.read(4)
-                #print(resp)
                 assert resp[1] == pkt[2] and resp[2] == pkt[3]
                 if resp[3] == 0x80:
                     raise MQTTException(resp[3])
                 return
-            counter = counter + 1 
-            time.sleep(0.5) 
-        raise MQTTException(-1)        
+            counter += 1
+            time.sleep(0.5)
+        raise MQTTException(-1)
 
-    # Wait for a single incoming MQTT message and process it.
-    # Subscribed messages are delivered to a callback previously
-    # set by .set_callback() method. Other (internal) MQTT
-    # messages processed internally.
     def wait_msg(self):
         res = self.sock.read(1)
         self.sock.setblocking(True)
@@ -184,10 +174,10 @@ class MQTTClient:
             return None
         if res == b"":
             raise OSError(-1)
-        if res == b"\xd0":  # PINGRESP
+        if res == b"\xd0":
             sz = self.sock.read(1)[0]
             assert sz == 0
-            return b"PINGRESP" #added for PINGRESP support
+            return b"PINGRESP"
         op = res[0]
         if op & 0xf0 != 0x30:
             return op
@@ -205,13 +195,34 @@ class MQTTClient:
         if op & 6 == 2:
             pkt = bytearray(b"\x40\x02\0\0")
             struct.pack_into("!H", pkt, 2, pid)
-            self.sock.write(pkt) #propably for SUBACK
+            self.sock.write(pkt)
         elif op & 6 == 4:
             assert 0
 
-    # Checks whether a pending message from server is available.
-    # If not, returns immediately with None. Otherwise, does
-    # the same processing as wait_msg.
     def check_msg(self):
         self.sock.setblocking(False)
         return self.wait_msg()
+
+
+# New helper function moved into the MQTT library
+def connect_mqtt(client_id, broker, port=1883, user=None, password=None, keepalive=0, ssl=False, ssl_params={}):
+    """
+    Create and connect an MQTTClient instance.
+    
+    :param client_id: Unique client identifier (often the device ID).
+    :param broker: The MQTT broker address.
+    :param port: Port number (default: 1883 for non-SSL, 8883 for SSL).
+    :param user: (Optional) Username.
+    :param password: (Optional) Password.
+    :param keepalive: (Optional) Keepalive time.
+    :param ssl: (Optional) Whether to use SSL.
+    :param ssl_params: (Optional) Dictionary of SSL parameters.
+    :return: A connected MQTTClient instance or None on failure.
+    """
+    client = MQTTClient(client_id, broker, port=port, user=user, password=password, keepalive=keepalive, ssl=ssl, ssl_params=ssl_params)
+    try:
+        client.connect()
+        return client
+    except Exception as e:
+        print("MQTT connection error:", e)
+        return None

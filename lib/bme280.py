@@ -37,7 +37,7 @@ class BME280:
         self.dig_H6 = unpack_from("<b", dig_e1_e7, 6)[0]
         self.i2c.writeto_mem(self.address, BME280_REGISTER_CONTROL, bytearray([0x3F]))
         self.t_fine = 0
-        self._l1_barray = bytearray(1)          # temporary data holders which stay allocated
+        self._l1_barray = bytearray(1)
         self._l8_barray = bytearray(8)
         self._l3_resultarray = array("i", [0, 0, 0])
  
@@ -50,32 +50,28 @@ class BME280:
         sleep_time = 1250 + 2300 * (1 << self._mode)
         sleep_time = sleep_time + 2300 * (1 << self._mode) + 575
         sleep_time = sleep_time + 2300 * (1 << self._mode) + 575
-        time.sleep_us(sleep_time)  # Wait the required time
+        time.sleep_us(sleep_time)
  
-        self.i2c.readfrom_mem_into(self.address, 0xF7, self._l8_barray)         # burst readout from 0xF7 to 0xFE, recommended by datasheet
+        self.i2c.readfrom_mem_into(self.address, 0xF7, self._l8_barray)
         readout = self._l8_barray
-        raw_press = ((readout[0] << 16) | (readout[1] << 8) | readout[2]) >> 4          # pressure(0xF7): ((msb << 16) | (lsb << 8) | xlsb) >> 4
-        raw_temp = ((readout[3] << 16) | (readout[4] << 8) | readout[5]) >> 4          # temperature(0xFA): ((msb << 16) | (lsb << 8) | xlsb) >> 4
-        raw_hum = (readout[6] << 8) | readout[7]          # humidity(0xFD): (msb << 8) | lsb
+        raw_press = ((readout[0] << 16) | (readout[1] << 8) | readout[2]) >> 4
+        raw_temp = ((readout[3] << 16) | (readout[4] << 8) | readout[5]) >> 4
+        raw_hum = (readout[6] << 8) | readout[7]
         result[0] = raw_temp
         result[1] = raw_press
         result[2] = raw_hum
  
     def read_compensated_data(self, result=None):
-        """ Reads the data from the sensor and returns the compensated data.
-            Args: result: array of length 3 or alike where the result will be stored, in temperature, pressure, humidity order. You may use this to read out the sensor without allocating heap memory
-            Returns: array with temperature, pressure, humidity. Will be the one from the result parameter if not None
-        """
         self.read_raw_data(self._l3_resultarray)
         raw_temp, raw_press, raw_hum = self._l3_resultarray
  
-        var1 = ((raw_temp >> 3) - (self.dig_T1 << 1)) * (self.dig_T2 >> 11)  # Temperature
+        var1 = ((raw_temp >> 3) - (self.dig_T1 << 1)) * (self.dig_T2 >> 11)
         var2 = (((((raw_temp >> 4) - self.dig_T1) *
                   ((raw_temp >> 4) - self.dig_T1)) >> 12) * self.dig_T3) >> 14
         self.t_fine = var1 + var2
         temp = (self.t_fine * 5 + 128) >> 8
  
-        var1 = self.t_fine - 128000  # Pressure
+        var1 = self.t_fine - 128000
         var2 = var1 * var1 * self.dig_P6
         var2 = var2 + ((var1 * self.dig_P5) << 17)
         var2 = var2 + (self.dig_P4 << 35)
@@ -90,8 +86,10 @@ class BME280:
             var2 = (self.dig_P8 * p) >> 19
             pressure = ((p + var1 + var2) >> 8) + (self.dig_P7 << 4)
  
-        h = self.t_fine - 76800 # Humidity
-        h = (((((raw_hum << 14) - (self.dig_H4 << 20) - (self.dig_H5 * h)) + 16384) >> 15) * (((((((h * self.dig_H6) >> 10) * (((h * self.dig_H3) >> 11) + 32768)) >> 10) + 2097152) * self.dig_H2 + 8192) >> 14))
+        h = self.t_fine - 76800
+        h = (((((raw_hum << 14) - (self.dig_H4 << 20) - (self.dig_H5 * h)) + 16384) >> 15) *
+             (((((((h * self.dig_H6) >> 10) * (((h * self.dig_H3) >> 11) + 32768)) >> 10) +
+                2097152) * self.dig_H2 + 8192) >> 14))
         h = h - (((((h >> 15) * (h >> 15)) >> 7) * self.dig_H1) >> 4)
         h = 0 if h < 0 else h
         h = 419430400 if h > 419430400 else h
@@ -107,21 +105,13 @@ class BME280:
  
     @property
     def values(self):
-        """ human readable values """
- 
         t, p, h = self.read_compensated_data()
- 
         p = p // 256
         pi = p // 100
         pd = p - pi * 100
- 
         hi = h // 1024
         hd = h * 100 // 1024 - hi * 100
-        #return ("{}C".format(t / 100), "{}.{:02d}hPa".format(pi, pd), "{}.{:02d}%".format(hi, hd))
         t = t/100*9/5+32
         h = h/1024
         p = p/100*0.02952998307
-        #print("   in bmp library, thp = ", t, h, p)
-        return(t, h, p)  #return units in degrees F and inches of mercury
-    
-#------------------------------------------------------------------------
+        return (t, h, p)
