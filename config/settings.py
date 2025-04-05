@@ -24,7 +24,7 @@ WIFI_CONFIG = {
 MQTT_CONFIG = {
     "ENABLED": True,
     # --- Update these values ---
-    "BROKER": "35.196.92.117", # Use the LoadBalancer IP
+    "BROKER": "35.243.252.129", # Use the LoadBalancer IP
     "PORT": 1883,                             # non-TLS Port
     "USER": "pico_device",                # <<< CHANGE THIS to your Pico's username
     "PASSWORD": "pico_pw123",          # <<< CHANGE THIS to your Pico's password
