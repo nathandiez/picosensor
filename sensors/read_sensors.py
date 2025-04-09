@@ -2,6 +2,7 @@
 
 from sensors.bme280_sensor import BME280Sensor
 from sensors.sht31d_sensor import SHT31DSensor
+from sensors.tmp117_sensor import TMP117Sensor
 from sensors.internal_temp_sensor import InternalTempSensor
 
 def get_all_sensor_readings(temp_sensor, motion_sensor, switch_sensor):
@@ -10,6 +11,10 @@ def get_all_sensor_readings(temp_sensor, motion_sensor, switch_sensor):
         temperature_f, humidity, pressure_inhg = temp_sensor.read_values()
     elif isinstance(temp_sensor, SHT31DSensor):
         temperature_f, humidity = temp_sensor.read_values()
+        pressure_inhg = None
+    elif isinstance(temp_sensor, TMP117Sensor):
+        temperature_f = temp_sensor.read_values()
+        humidity = None
         pressure_inhg = None
     elif isinstance(temp_sensor, InternalTempSensor):
         temperature_f = temp_sensor.read_values()

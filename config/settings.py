@@ -24,7 +24,7 @@ WIFI_CONFIG = {
 MQTT_CONFIG = {
     "ENABLED": True,
     # --- Update these values ---
-    "BROKER": "35.243.252.129", # Use the LoadBalancer IP
+    "BROKER": "172.210.105.196", # Use the AKS LoadBalancer IP
     "PORT": 1883,                             # non-TLS Port
     "USER": "pico_device",                # <<< CHANGE THIS to your Pico's username
     "PASSWORD": "pico_pw123",          # <<< CHANGE THIS to your Pico's password
@@ -54,3 +54,10 @@ MOTION_WAIT_PERIOD = 30000   # 30 seconds
 MOTION_CHECK_INTERVAL = 1000  # 1 second
 SWITCH_CHECK_INTERVAL = 1000  # 1 second
 TEMPERATURE_CHECK_INTERVAL = 5000  # 5 seconds
+
+# Timezone configuration
+TIME_CONFIG = {
+    "NTP_ENABLED": True,    # Enable NTP time synchronization
+    "TIMEZONE_OFFSET": -4,  # Eastern Time (UTC-4 for EDT, or -5 for EST)
+    "DST_ACTIVE": True      # Is Daylight Saving Time currently active?
+}

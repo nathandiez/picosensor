@@ -11,18 +11,50 @@ from config.settings import (
     MOTION_WAIT_PERIOD,
     MOTION_CHECK_INTERVAL,
     SWITCH_CHECK_INTERVAL,
-    TEMPERATURE_CHECK_INTERVAL
+    TEMPERATURE_CHECK_INTERVAL,
+    TIME_CONFIG
 )
 from connections.wifi_manager import WiFiManager
 from connections.mqtt_manager import MQTTManager
 from sensors.bme280_sensor import BME280Sensor
 from sensors.sht31d_sensor import SHT31DSensor
+from sensors.tmp117_sensor import TMP117Sensor  # Added the TMP117 import
 from sensors.internal_temp_sensor import InternalTempSensor
 from sensors.motion_sensor import MotionSensor
 from sensors.switch_sensor import SwitchSensor
 from sensors.read_sensors import get_all_sensor_readings
 from utils.device_id import get_device_id
 from utils.led_indicator import LEDIndicator
+
+
+def set_rtc_from_ntp():
+    import ntptime
+    import time
+    from machine import RTC
+    
+    # Configure the timezone offset
+    timezone_offset = TIME_CONFIG.get("TIMEZONE_OFFSET", 0) * 3600  # Convert hours to seconds
+    
+    try:
+        ntptime.settime()  # Sync with NTP server
+        # Get current time (UTC)
+        year, month, day, hour, minute, second, _, _ = time.gmtime()
+        
+        # Apply timezone offset
+        utc_seconds = time.mktime((year, month, day, hour, minute, second, 0, 0))
+        local_time = time.gmtime(utc_seconds + timezone_offset)
+        
+        # Update RTC
+        rtc = RTC()
+        rtc.datetime((local_time[0], local_time[1], local_time[2], 
+                     local_time[6], local_time[3], local_time[4], 
+                     local_time[5], 0))
+        
+        print(f"RTC synchronized. Local time: {local_time[0]}-{local_time[1]:02d}-{local_time[2]:02d} {local_time[3]:02d}:{local_time[4]:02d}:{local_time[5]:02d}")
+        return True
+    except Exception as e:
+        print(f"Failed to set time: {e}")
+        return False
 
 
 # --- Main Execution Logic ---
@@ -38,6 +70,11 @@ def run_application():
         wifi = WiFiManager(WIFI_CONFIG["SSID"], WIFI_CONFIG["PASSWORD"])
         if not wifi.connect():
             raise RuntimeError("Initial WiFi connection failed")
+            
+        # Synchronize time with NTP server after WiFi connection
+        if TIME_CONFIG.get("NTP_ENABLED", False):
+            print("Attempting NTP time sync...")
+            set_rtc_from_ntp()
 
         mqtt_enabled = MQTT_CONFIG.get("ENABLED", False)
         mqtt = None
@@ -60,8 +97,13 @@ def run_application():
                     print("Using SHT31D sensor.")
                 except Exception as e2:
                     print(f"SHT31D not found: {e2}")
-                    temp_sensor = InternalTempSensor()
-                    print("Using internal temperature sensor.")
+                    try:
+                        temp_sensor = TMP117Sensor(TEMP_SENSOR_PINS)  # Try the TMP117 sensor
+                        print("Using TMP117 sensor.")
+                    except Exception as e3:
+                        print(f"TMP117 not found: {e3}")
+                        temp_sensor = InternalTempSensor()
+                        print("Using internal temperature sensor.")
 
             motion_sensor = MotionSensor(MOTION_SENSOR_PIN)
             switch_sensor = SwitchSensor(SWITCH_SENSOR_PIN)
@@ -152,14 +194,23 @@ def run_application():
                         current_readings["temperature_f"] = temperature_f
                         current_readings["humidity"] = humidity
                         current_readings["pressure_inhg"] = None
+                    elif isinstance(temp_sensor, TMP117Sensor):  # Handle TMP117 sensor
+                        temperature_f = temp_sensor.read_values()
+                        current_readings["temperature_f"] = temperature_f
+                        current_readings["humidity"] = None
+                        current_readings["pressure_inhg"] = None
                     elif isinstance(temp_sensor, InternalTempSensor):
                         temperature_f = temp_sensor.read_values()
                         current_readings["temperature_f"] = temperature_f
                         current_readings["humidity"] = None
                         current_readings["pressure_inhg"] = None
+                    
+                    # Reading was successful
                     last_temperature_check_time = current_time
                 except Exception as e:
                     print(f"Error reading temperature sensor: {e}")
+                    # Still update the timestamp to prevent excessive retries
+                    last_temperature_check_time = current_time
                     
             time_since_last_publish = time.ticks_diff(current_time, last_publish_time)
             time_since_last_motion_publish = time.ticks_diff(current_time, last_motion_publish_time)
