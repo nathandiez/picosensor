@@ -2,10 +2,11 @@
 import machine
 import time
 
+
 class SHT31DSensor:
     def __init__(self, config):
-        scl_pin = config.get("I2C_SCL", 5)
-        sda_pin = config.get("I2C_SDA", 4)
+        scl_pin = config.get("i2c_scl")
+        sda_pin = config.get("i2c_sda")
         self.i2c = machine.I2C(0, scl=machine.Pin(scl_pin), sda=machine.Pin(sda_pin))
         self.addr = 0x44
         if self.addr not in self.i2c.scan():
@@ -13,7 +14,7 @@ class SHT31DSensor:
 
     def read_values(self):
         # High repeatability measurement command
-        self.i2c.writeto(self.addr, b'\x24\x00')
+        self.i2c.writeto(self.addr, b"\x24\x00")
         time.sleep_ms(15)
         data = self.i2c.readfrom(self.addr, 6)
 

@@ -224,5 +224,5 @@ def connect_mqtt(client_id, broker, port=1883, user=None, password=None, keepali
         client.connect()
         return client
     except Exception as e:
-        print("MQTT connection error:", e)
+        #print("MQTT connection error:", e)
         return None

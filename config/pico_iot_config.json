@@ -1,0 +1,44 @@
+{
+    "device_list": [
+      {
+        "device_id": "pico_iot_01",
+        "name": "Basement 01",
+        "enabled": 1,
+        "temperature_calibration": -0.9,
+        "humidity_calibration": 0.0,
+        "pressure_calibration": 0.0
+      },
+      {
+        "device_id": "pico_iot_13",
+        "name": "Garage 13",
+        "enabled": 0,
+        "temperature_calibration": -0.9,
+        "humidity_calibration": 0.0,
+        "pressure_calibration": 0.0
+      }
+    ],
+    "device_global_config": {
+      "HEARTBEAT_PUBLISH_PERIOD": 10000,
+      "MQTT_RECONNECT_DELAY": 10000,
+      "MOTION_COOLDOWN_WAIT_PERIOD": 30000,
+      "MOTION_CHECK_PERIOD": 1000,
+      "SWITCH_CHECK_PERIOD": 1000,
+      "TEMPERATURE_CHECK_PERIOD": 5000
+    },
+    "mqtt_config": {
+      "ENABLED": false,
+      "BROKER": "52.224.52.183",
+      "PORT": 1883,
+      "USER": "pico_device",
+      "PASSWORD": "pico_pw123",
+      "BASE_TOPIC": "home/sensors",
+      "SSL": false
+    },
+    "iot_server_config": {
+      "OFFLINE_THRESHOLD": [0, 0, 3, 0, 0],
+      "ERROR_LOG_COOLDOWN_PERIOD": [0, 0, 10, 0, 0],
+      "OFFLINE_ERROR_WAIT_PERIOD": [0, 0, 30, 0, 0],
+      "STATUS_REPORT_PERIOD": [0, 0, 0, 10, 0],
+      "sms_enabled": 0
+    }
+  }

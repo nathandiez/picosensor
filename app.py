@@ -1,254 +1,371 @@
 # app.py
-
 import time
 import machine
 import gc
-from config.settings import (
-    WIFI_CONFIG, MQTT_CONFIG, TEMP_SENSOR_PINS,
-    MOTION_SENSOR_PIN, SWITCH_SENSOR_PIN,
-    MAIN_LOOP_DELAY,
-    MQTT_RECONNECT_DELAY,
-    MOTION_WAIT_PERIOD,
-    MOTION_CHECK_INTERVAL,
-    SWITCH_CHECK_INTERVAL,
-    TEMPERATURE_CHECK_INTERVAL,
-    TIME_CONFIG
-)
+import json
+
+from config.config_loader import ConfigLoader
 from connections.wifi_manager import WiFiManager
 from connections.mqtt_manager import MQTTManager
-from sensors.bme280_sensor import BME280Sensor
-from sensors.sht31d_sensor import SHT31DSensor
-from sensors.tmp117_sensor import TMP117Sensor  # Added the TMP117 import
-from sensors.internal_temp_sensor import InternalTempSensor
-from sensors.motion_sensor import MotionSensor
-from sensors.switch_sensor import SwitchSensor
-from sensors.read_sensors import get_all_sensor_readings
+from sensors.sensor_manager import SensorManager
+from displays.OLED1306Manager import OLED1306Display
 from utils.device_id import get_device_id
 from utils.led_indicator import LEDIndicator
-
-
-def set_rtc_from_ntp():
-    import ntptime
-    import time
-    from machine import RTC
-    
-    # Configure the timezone offset
-    timezone_offset = TIME_CONFIG.get("TIMEZONE_OFFSET", 0) * 3600  # Convert hours to seconds
-    
-    try:
-        ntptime.settime()  # Sync with NTP server
-        # Get current time (UTC)
-        year, month, day, hour, minute, second, _, _ = time.gmtime()
-        
-        # Apply timezone offset
-        utc_seconds = time.mktime((year, month, day, hour, minute, second, 0, 0))
-        local_time = time.gmtime(utc_seconds + timezone_offset)
-        
-        # Update RTC
-        rtc = RTC()
-        rtc.datetime((local_time[0], local_time[1], local_time[2], 
-                     local_time[6], local_time[3], local_time[4], 
-                     local_time[5], 0))
-        
-        print(f"RTC synchronized. Local time: {local_time[0]}-{local_time[1]:02d}-{local_time[2]:02d} {local_time[3]:02d}:{local_time[4]:02d}:{local_time[5]:02d}")
-        return True
-    except Exception as e:
-        print(f"Failed to set time: {e}")
-        return False
-
+from utils.logger import Logger
+from utils.fan_controller import FanController
 
 # --- Main Execution Logic ---
+
+
 def run_application():
+    print("\n################ Starting up ################")
+
+    # Create basic logger immediately (local only initially)
+    logger = Logger.get_instance()
+    logger.log("Boot: Logger created")
+
+    # Get device ID (needed for both config and logger)
     device_id = get_device_id()
-    print(f"Device ID: {device_id}")
+    logger.log(f"Device ID: {device_id}")
 
-    # Initialize LED indicator
+    # Visual indicator for startup
     led_indicator = LEDIndicator()
-    
+    led_indicator.start(500)  # Fast blink during init
+
+    # Initialize WiFi early - don't wait for config
+    # This gets network connectivity established ASAP
+    logger.log("Connecting WiFi...")
+    wifi = WiFiManager()
+    if not wifi.connect():
+        logger.log("WiFi failed")
+        raise RuntimeError("WiFi init failed")
+    logger.log("WiFi connected")
+
+    # Now load config after WiFi is ready
+    config_loader = ConfigLoader(device_id)
+    config = config_loader.load_config()
+
+    if config is None:
+        logger.log("FATAL: failed to load configuration, restarting...")
+        time.sleep_ms(5000)
+        machine.reset()
+
+    # Set up device info and remote logging as early as possible
+    # This happens right after we have both WiFi and config
+    logger.set_device_info(device_id, config.get("name", device_id))
+    logger.configure_remote_logging(config)
+    logger.log("--- Remote logging initialized ---")
+
+    # Now proceed with the rest of the initialization
+    # Extract config settings
+    oled_cfg = config["oled_config"]
+    temp_pins = config["temp_sensor_pins"]
+    motion_pin = config["motion_sensor_pin"]
+    switch_pin = config["switch_sensor_pin"]
+    onewire_data_pin = config["onewire_data_pin"]
+
+    # Create OLED and attach to logger
+    oled = OLED1306Display(oled_cfg)
+    logger.set_display(oled)
+
+    if oled.is_initialized():
+        oled.bigline1("Initializing...")
+    else:
+        logger.log("OLED failed to initialize")
+
+    # Continue with sensor initialization and main loop...
+
     try:
-        print("Initializing WiFi...")
-        wifi = WiFiManager(WIFI_CONFIG["SSID"], WIFI_CONFIG["PASSWORD"])
-        if not wifi.connect():
-            raise RuntimeError("Initial WiFi connection failed")
-            
-        # Synchronize time with NTP server after WiFi connection
-        if TIME_CONFIG.get("NTP_ENABLED", False):
-            print("Attempting NTP time sync...")
-            set_rtc_from_ntp()
+        logger.log("Initializing Sensors...")
+        sensor_manager = SensorManager(
+            temp_pins,
+            motion_pin,
+            switch_pin,
+            onewire_data_pin,
+        )
+        if not sensor_manager.initialize_sensors():
+            raise RuntimeError("Sensor initialization failed")
 
-        mqtt_enabled = MQTT_CONFIG.get("ENABLED", False)
-        mqtt = None
-        mqtt_reconnect_delay = MQTT_CONFIG.get("MQTT_RECONNECT_DELAY", 10000)
-
-        if mqtt_enabled:
-            mqtt = MQTTManager(device_id, MQTT_CONFIG)
-        else:
-            print("MQTT is disabled in settings.")
-
-        print("Initializing Sensors...")
-        try:
-            try:
-                temp_sensor = BME280Sensor(TEMP_SENSOR_PINS)
-                print("Using BME280 sensor.")
-            except Exception as e1:
-                print(f"BME280 not found: {e1}")
-                try:
-                    temp_sensor = SHT31DSensor(TEMP_SENSOR_PINS)
-                    print("Using SHT31D sensor.")
-                except Exception as e2:
-                    print(f"SHT31D not found: {e2}")
-                    try:
-                        temp_sensor = TMP117Sensor(TEMP_SENSOR_PINS)  # Try the TMP117 sensor
-                        print("Using TMP117 sensor.")
-                    except Exception as e3:
-                        print(f"TMP117 not found: {e3}")
-                        temp_sensor = InternalTempSensor()
-                        print("Using internal temperature sensor.")
-
-            motion_sensor = MotionSensor(MOTION_SENSOR_PIN)
-            switch_sensor = SwitchSensor(SWITCH_SENSOR_PIN)
-            previous_motion_state = motion_sensor.read()
-            previous_switch_state = switch_sensor.read()
-
-            print(f"Initial Motion: {previous_motion_state}, Initial Switch: {previous_switch_state}")
-
-        except Exception as e:
-            raise RuntimeError(f"Sensor initialization failed: {e}")
-
-        # Start LED blinking after successful initialization
-        led_indicator.start(1000)  # Blink once per second
-            
-        print("Starting main loop...")
-        last_publish_time = time.ticks_ms() - MAIN_LOOP_DELAY
+        logger.log("Starting main loop...")
+        # Set initial check times
+        last_publish_time = 0
         last_motion_publish_time = 0
         last_motion_check_time = 0
         last_switch_check_time = 0
         last_temperature_check_time = 0
-        
-        # Store most recent reading values
+        last_check_config_file_time = time.ticks_ms() - (
+            24 * 60 * 60 * 1000
+        )  # ~1 day ago in ms
+
+        # Initialize default values (will be overridden by config)
+        device_enabled = False
+        mqtt_enabled = False
+        heartbeat_publish_period = 60000  # Default: 1 minute
+        mqtt_reconnect_delay = 10000  # Default: 10 seconds
+        motion_cooldown_period = 30000  # Default: 30 seconds
+        motion_check_period = 500  # Default: 0.5 seconds
+        switch_check_period = 500  # Default: 0.5 seconds
+        temperature_check_period = 30000  # Default: 30 seconds
+        check_config_file_period = 60000  # Default: 1 minute
+
         current_readings = {
             "temperature_f": None,
             "humidity": None,
             "pressure_inhg": None,
             "motion": "UNKNOWN",
-            "switch": "UNKNOWN"
+            "switch": "UNKNOWN",
+            "fan_duty": 0,  # Added fan_duty to readings
         }
-        
+        logger.log("Enter Loop...")
+        time.sleep_ms(1000)
+
+        # Initialize mqtt and fan_controller variables
+        mqtt = None
+        fan_controller = None
+
         while True:
-            gc.collect()
-            current_time = time.ticks_ms()
-            
-            # Update LED indicator (non-blocking)
-            led_indicator.update()
+            try:
+                gc.collect()
+                current_time = time.ticks_ms()
 
-            if not wifi.ensure_connected():
-                print(f"WiFi disconnected, retrying in {mqtt_reconnect_delay//1000}s...")
-                if mqtt: mqtt.client = None
-                time.sleep_ms(mqtt_reconnect_delay)
-                continue
+                led_indicator.update()  # Update LED state
 
-            if mqtt_enabled and (mqtt is None or not mqtt.ensure_connected()):
-                print(f"MQTT disconnected, retrying in {mqtt_reconnect_delay//1000}s...")
-                time.sleep_ms(mqtt_reconnect_delay)
-                continue
+                # Always check for config updates first
+                check_config_file = (
+                    time.ticks_diff(current_time, last_check_config_file_time)
+                    >= check_config_file_period
+                )
 
-            check_motion = time.ticks_diff(current_time, last_motion_check_time) >= MOTION_CHECK_INTERVAL
-            check_switch = time.ticks_diff(current_time, last_switch_check_time) >= SWITCH_CHECK_INTERVAL
-            check_temperature = time.ticks_diff(current_time, last_temperature_check_time) >= TEMPERATURE_CHECK_INTERVAL
-            
-            motion_detected_now = False
-            switch_changed = False
-            
-            # Check motion sensor
-            if check_motion:
-                try:
-                    current_motion_state = motion_sensor.read()
-                    motion_detected_now = current_motion_state == "HIGH" and previous_motion_state == "LOW"
-                    previous_motion_state = current_motion_state
-                    current_readings["motion"] = current_motion_state
+                if check_config_file:
+                    new_config = config_loader.check_config()
+                    if new_config is not None and new_config is not config:
+                        logger.log("New config file!")
+                        config = new_config
+                        if mqtt is not None:
+                            mqtt.disconnect()
+                            mqtt = None  # Reset MQTT connection
+                        logger.log("re-initializing all configs...")
+
+                        # Update using snake_case naming convention
+                        device_enabled = config.get("enabled", 0)
+                        mqtt_config = config.get("mqtt_config", {})
+                        mqtt_enabled = mqtt_config.get("enabled", False)
+
+                        # Get configuration using snake_case
+                        heartbeat_publish_period = config.get(
+                            "heartbeat_publish_period", heartbeat_publish_period
+                        )
+                        mqtt_reconnect_delay = config.get(
+                            "mqtt_reconnect_delay", mqtt_reconnect_delay
+                        )
+                        motion_cooldown_period = config.get(
+                            "motion_cooldown_wait_period", motion_cooldown_period
+                        )
+                        motion_check_period = config.get(
+                            "motion_check_period", motion_check_period
+                        )
+                        switch_check_period = config.get(
+                            "switch_check_period", switch_check_period
+                        )
+                        temperature_check_period = config.get(
+                            "temperature_check_period", temperature_check_period
+                        )
+                        check_config_file_period = config.get(
+                            "check_config_file_period", check_config_file_period
+                        )
+
+                        logger.log(
+                            f"Device '{config.get('name', device_id)}' enable flag = {device_enabled}"
+                        )
+                        logger.log(f"MQTT enabled: {mqtt_enabled}")
+
+                        # Initialize MQTT for events
+                        mqtt = MQTTManager(device_id, mqtt_config)
+
+                        # Configure logger with device info
+                        logger.set_device_info(device_id, config.get("name", device_id))
+
+                        # Set MQTT manager on logger
+                        logger.set_mqtt_manager(mqtt)
+
+                        # Configure remote logging (both HTTP and MQTT)
+                        logger.configure_remote_logging(config)
+
+                        # Initialize or reconfigure fan controller
+                        if fan_controller is None:
+                            logger.log("Initializing fan controller...")
+                            fan_controller = FanController(config)
+                        else:
+                            logger.log("Reconfiguring fan controller...")
+                            fan_controller.configure(config)
+
+                        last_publish_time = (
+                            time.ticks_ms() - heartbeat_publish_period + 2000
+                        )  # First publish in 2 seconds
+
+                    last_check_config_file_time = current_time
+
+                check_motion = (
+                    time.ticks_diff(current_time, last_motion_check_time)
+                    >= motion_check_period
+                )
+                check_switch = (
+                    time.ticks_diff(current_time, last_switch_check_time)
+                    >= switch_check_period
+                )
+                check_temperature = (
+                    time.ticks_diff(current_time, last_temperature_check_time)
+                    >= temperature_check_period
+                )
+
+                motion_detected_now = False
+                switch_changed = False
+
+                if check_motion:
+                    # logger.log("Checking Motion...")
+                    motion_data = None
+                    if device_enabled:
+                        motion_data = sensor_manager.read_motion()
+                        if motion_data is not None:  # Explicit check
+                            current_readings["motion"] = motion_data["motion"]
+                            motion_detected_now = motion_data["motion_detected"]
                     last_motion_check_time = current_time
-                except Exception as e:
-                    print(f"Error reading motion sensor: {e}")
-            
-            # Check switch sensor
-            if check_switch:
-                try:
-                    current_switch_state = switch_sensor.read()
-                    switch_changed = current_switch_state != previous_switch_state
-                    previous_switch_state = current_switch_state
-                    current_readings["switch"] = current_switch_state
+
+                if check_switch:
+                    switch_data = None
+                    if device_enabled:
+                        switch_data = sensor_manager.read_switch()
+                        if switch_data is not None:  # Explicit check
+                            current_readings["switch"] = switch_data["switch"]
+                            switch_changed = switch_data["switch_changed"]
                     last_switch_check_time = current_time
-                except Exception as e:
-                    print(f"Error reading switch sensor: {e}")
-            
-            # Check temperature sensor
-            if check_temperature:
-                try:
-                    if isinstance(temp_sensor, BME280Sensor):
-                        temperature_f, humidity, pressure_inhg = temp_sensor.read_values()
-                        current_readings["temperature_f"] = temperature_f
-                        current_readings["humidity"] = humidity
-                        current_readings["pressure_inhg"] = pressure_inhg
-                    elif isinstance(temp_sensor, SHT31DSensor):
-                        temperature_f, humidity = temp_sensor.read_values()
-                        current_readings["temperature_f"] = temperature_f
-                        current_readings["humidity"] = humidity
-                        current_readings["pressure_inhg"] = None
-                    elif isinstance(temp_sensor, TMP117Sensor):  # Handle TMP117 sensor
-                        temperature_f = temp_sensor.read_values()
-                        current_readings["temperature_f"] = temperature_f
-                        current_readings["humidity"] = None
-                        current_readings["pressure_inhg"] = None
-                    elif isinstance(temp_sensor, InternalTempSensor):
-                        temperature_f = temp_sensor.read_values()
-                        current_readings["temperature_f"] = temperature_f
-                        current_readings["humidity"] = None
-                        current_readings["pressure_inhg"] = None
-                    
-                    # Reading was successful
+
+                if check_temperature:
+                    # logger.log("Reading temperature...")
+                    temp_data = None
+                    if device_enabled:
+                        temp_data = sensor_manager.read_temperature()
+                        if temp_data is not None:  # Explicit check
+                            current_readings.update(temp_data)
+
+                            # Update fan controller with current temperature
+                            if (
+                                fan_controller is not None
+                                and "temperature_c" in temp_data
+                            ):
+                                fan_duty = fan_controller.update(
+                                    temp_data["temperature_c"]
+                                )
+                                # Add fan duty to current readings for MQTT publishing
+                                current_readings["fan_duty"] = fan_duty
+
+                            # Display temperature on OLED headline
+                            if oled.is_initialized():
+                                temp_f = temp_data.get("temperature_f")
+                                fan_info = ""
+                                # if "fan_duty" in current_readings and current_readings["fan_duty"] > 0:
+                                fan_info = f"  Fan:{current_readings['fan_duty']}%"
+                                # logger.log(f"Fan duty: {current_readings['fan_duty']}%")
+                                oled.bigline1(f"T:{temp_f:.1f} F{fan_info}")
+                                oled.bigline2(f"T:{temp_f*5/9:.1f}C")
                     last_temperature_check_time = current_time
-                except Exception as e:
-                    print(f"Error reading temperature sensor: {e}")
-                    # Still update the timestamp to prevent excessive retries
-                    last_temperature_check_time = current_time
-                    
-            time_since_last_publish = time.ticks_diff(current_time, last_publish_time)
-            time_since_last_motion_publish = time.ticks_diff(current_time, last_motion_publish_time)
 
-            allow_motion_publish = (time_since_last_motion_publish >= MOTION_WAIT_PERIOD)
-            triggered_by_motion = motion_detected_now and allow_motion_publish
-            triggered_by_switch = switch_changed
-            triggered_by_timer = (time_since_last_publish >= MAIN_LOOP_DELAY)
+                # --- Publish Logic (using intervals/periods from config) ---
+                time_since_last_publish = time.ticks_diff(
+                    current_time, last_publish_time
+                )
+                time_since_last_motion_publish = time.ticks_diff(
+                    current_time, last_motion_publish_time
+                )
 
-            should_publish = triggered_by_motion or triggered_by_switch or triggered_by_timer
+                allow_motion_publish = (
+                    time_since_last_motion_publish >= motion_cooldown_period
+                )
+                triggered_by_motion = motion_detected_now and allow_motion_publish
+                triggered_by_switch = switch_changed
+                triggered_by_heartbeat = (
+                    time_since_last_publish >= heartbeat_publish_period
+                )
 
-            if mqtt_enabled and mqtt and should_publish:
-                event_type = "unknown"
-                if triggered_by_motion:
-                    event_type = "motion"
-                elif triggered_by_switch:
-                    event_type = "switch"
-                elif triggered_by_timer:
+                should_publish = (
+                    triggered_by_motion or triggered_by_switch or triggered_by_heartbeat
+                )
+
+                if should_publish and device_enabled:
                     event_type = "heartbeat"
-
-                print(f"Publish trigger: {event_type}")
-
-                if mqtt.publish(current_readings, event_type):
-                    last_publish_time = current_time
                     if triggered_by_motion:
-                        last_motion_publish_time = current_time
+                        event_type = "motion"
+                    elif triggered_by_switch:
+                        event_type = "switch"
 
-            elif motion_detected_now and not allow_motion_publish:
-                remaining_cooldown = (MOTION_WAIT_PERIOD - time_since_last_motion_publish) // 1000
-                print(f"Motion detected but in cooldown ({remaining_cooldown:.1f}s left)")
+                    json_payload = mqtt.format_payload(current_readings, event_type)
+                    logger.log(f"MQTT event: {event_type}: {json_payload}")
 
-            # Sleep for smallest interval to ensure we don't miss any readings
-            min_interval = min(MOTION_CHECK_INTERVAL, SWITCH_CHECK_INTERVAL)
-            time.sleep_ms(min_interval)
-    
+                    if mqtt_enabled and mqtt is not None:
+                        if mqtt.publish(current_readings, event_type):
+                            last_publish_time = current_time
+                            if triggered_by_motion:
+                                last_motion_publish_time = current_time
+                        else:
+                            logger.log("MQTT publish failed.")
+                            # Still update timestamps to prevent immediate retries
+                            last_publish_time = current_time
+                            if triggered_by_motion:
+                                last_motion_publish_time = current_time
+                    else:
+                        # MQTT disabled but still update timestamps
+                        last_publish_time = current_time
+                        if triggered_by_motion:
+                            last_motion_publish_time = current_time
+
+                elif motion_detected_now and not allow_motion_publish:
+                    remaining_cooldown = (
+                        max(
+                            0, (motion_cooldown_period - time_since_last_motion_publish)
+                        )
+                        // 1000
+                    )
+                    # logger.log(f"Motion detected but in cooldown ({remaining_cooldown}s left)") # Reduce verbosity
+
+                # --- Loop Delay ---
+                min_period = min(
+                    motion_check_period,
+                    switch_check_period,
+                    temperature_check_period,
+                    500,
+                )  # e.g., check at least twice per second
+                # Sleep briefly but ensure responsiveness
+                sleep_duration = max(100, min_period // 4)
+                time.sleep_ms(sleep_duration)
+
+            except KeyboardInterrupt:
+                logger.log("Ctrl+C detected, exiting main loop...")
+                break  # Exit the loop on Ctrl+C
+
+            except Exception as e:
+                # Handle loop-specific exceptions without exiting the function
+                logger.log(f"Error in main loop: {e}")
+                time.sleep_ms(1000)  # Short pause after an error
+
+    except Exception as e:
+        # Use str(e) for safety, check if led_indicator exists
+        logger.log(f"FATAL error in run_application: {str(e)}")
+        logger.log("Activating error LED pattern (fast blink)...")
+        if led_indicator:  # Check if led_indicator was successfully initialized
+            led_indicator.start(100)  # Fast flash
+        logger.log("Rebooting in 30 seconds...")
+        time.sleep(30)  # Use time.sleep() as time_ms isn't imported
+        machine.reset()
+
     finally:
-        # Ensure LED is turned off when exiting
-        led_indicator.stop()
+        # Clean up resources
+        if "fan_controller" in locals() and fan_controller:
+            fan_controller.deinit()
+        # Ensure LED is turned off if loop exits normally (e.g., device disabled)
+        if led_indicator:
+            led_indicator.stop()
+        logger.log("Application stopped.")
+
 
 if __name__ == "__main__":
     try:
@@ -256,7 +373,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Ctrl+C pressed, exiting.")
     except Exception as e:
-        print(f"FATAL error: {e}")
+        print(f"Critical bootstrap error: {e}")
         print("Rebooting in 30 seconds...")
-        time.sleep_ms(30000)
+        time.sleep(30)
         machine.reset()
