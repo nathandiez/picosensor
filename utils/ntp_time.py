@@ -2,26 +2,26 @@
 import ntptime
 import time
 
+
 class NTPClock:
     """
     NTPClock class for synchronizing the internal RTC with an NTP server.
     Optionally applies an offset (in seconds) to convert UTC to local time.
     For EST (Eastern Standard Time), use an offset of -5*3600 (i.e., -18000 seconds).
     """
-    def __init__(self, server="pool.ntp.org", offset=-5*3600):
+
+    def __init__(self, server="pool.ntp.org", offset=-5 * 3600):
         self.server = server
         self.offset = offset
 
     def sync(self):
-        """
-        Synchronize the internal clock with the NTP server.
-        This sets the RTC to UTC.
-        """
         try:
             ntptime.host = self.server
-            ntptime.settime()  # This sets the RTC to UTC
+            ntptime.settime()  # Sets the RTC to UTC
+            return True
         except Exception as e:
             print("NTP sync failed:", e)
+            return False
 
     def get_time_str(self):
         """
@@ -37,6 +37,10 @@ class NTPClock:
         # Convert back to a time tuple.
         local_time = time.localtime(local_seconds)
         return "{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}".format(
-            local_time[0], local_time[1], local_time[2],
-            local_time[3], local_time[4], local_time[5]
+            local_time[0],
+            local_time[1],
+            local_time[2],
+            local_time[3],
+            local_time[4],
+            local_time[5],
         )

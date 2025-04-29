@@ -1,4 +1,5 @@
-# connections/wifi_manager.py
+# wifi_manager.py
+
 import network
 import time
 from utils.ntp_time import NTPClock
@@ -6,17 +7,19 @@ from utils.logger import Logger
 
 
 class WiFiManager:
-    def __init__(self, time_offset=-5 * 3600):
+    def __init__(
+        self, time_offset=-4 * 3600
+    ):  # To-do is to replace this hardcoded offset with a better solution
         self.ssid = "Mesh-678"
         self.password = "DaisyRabbit"
-        self.ntp_host = "pool.ntp.org"
+        self.ntp_host = "time.google.com"  # Changed from "pool.ntp.org"
         self.time_offset = time_offset
         self.wlan = network.WLAN(network.STA_IF)
         self.ntp_synced = False
         self.ntp_time = None
 
         self.logger = Logger.get_instance()
-        self.logger.log(f"wifi Manager initialized")
+        self.logger.log("wifi Manager initialized")
 
     def connect(self):
         self.logger.log("Connecting to WiFi...")
@@ -40,26 +43,27 @@ class WiFiManager:
 
         if self.wlan.isconnected():
             self.logger.log("WiFi Connected.")
-            self.logger.log("IP Config:", self.wlan.ifconfig())
+            self.logger.log(f"IP Config: {self.wlan.ifconfig()}")
             self._sync_time()
             return True
         else:
             self.logger.log("WiFi connection failed.")
             self.wlan.active(False)  # Turn off WLAN if connect failed
-            return False
+            raise RuntimeError("WiFi connection failed")
 
     def _sync_time(self):
-        self.logger.log("Attempting NTP time sync...")
+        self.logger.log(f"Attempting NTP time sync with {self.ntp_host}...")
         try:
             self.ntp_time = NTPClock(self.ntp_host, offset=self.time_offset)
-            if self.ntp_time.sync():
+            result = self.ntp_time.sync()
+            self.logger.log(f"NTP sync result: {result}")
+            if result is True:
                 self.ntp_synced = True
                 print("Time after NTP sync:", self.ntp_time.get_time_str())
             else:
-                self.ntp_synced = False
+                raise RuntimeError("NTP sync failed (sync() returned non-True value)")
         except Exception as e:
-            self.logger.log(f"NTP sync failed: {e}")
-            self.ntp_synced = False  # Reset flag if sync fails
+            raise RuntimeError(f"NTP sync raised exception: {e}")
 
     def is_connected(self):
         return self.wlan.isconnected()

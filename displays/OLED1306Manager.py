@@ -6,25 +6,13 @@ from lib.oled1306.ssd1306 import SSD1306_I2C
 
 
 class OLED1306Display:
-    def __init__(self, config=None):
-        """Initialize the OLED display with the given configuration"""
-        # Use configuration from settings if provided, otherwise use defaults
-        if config is None:
-            # Default configuration
-            self.i2c_id = 0
-            self.sda_pin = 12
-            self.scl_pin = 13
-            self.width = 128
-            self.height = 64
-            self.addr = 0x3C
-        else:
-            # Use configuration from settings
-            self.i2c_id = config.get("i2c_id")
-            self.sda_pin = config.get("sda_pin")
-            self.scl_pin = config.get("scl_pin")
-            self.width = config.get("width")
-            self.height = config.get("height")
-            self.addr = config.get("i2c_addr")
+    def __init__(self):
+        self.i2c_id = 0
+        self.sda_pin = 20
+        self.scl_pin = 21
+        self.width = 128
+        self.height = 64
+        self.addr = 60
 
         # Status rows for display
         self.strows = [
@@ -441,3 +429,35 @@ class OLED1306Display:
         # 4) Push one frame
         self.oled.show()
         return True
+
+    def deinit(self):
+        """Clean up OLED display resources before shutdown"""
+        if not self.is_initialized():
+            return False
+
+        try:
+            # Clear the display first
+            self.oled.fill(0)
+            self.oled.show()
+
+            # Power off the display
+            self.oled.poweroff()
+
+            # Deinitialize the I2C bus if it exists
+            if hasattr(self, "i2c") and self.i2c:
+                try:
+                    self.i2c.deinit()
+                except AttributeError:
+                    # SoftI2C might not have deinit in some MicroPython versions
+                    pass
+
+            # Set display object to None to indicate it's deinitialized
+            self.oled = None
+
+            # Free memory with garbage collection
+            gc.collect()
+
+            return True
+        except Exception as e:
+            print(f"OLED deinit error: {e}")
+            return False

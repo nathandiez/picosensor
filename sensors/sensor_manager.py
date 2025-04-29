@@ -11,13 +11,17 @@ from sensors.switch_sensor import SwitchSensor
 
 class SensorManager:
     def __init__(
-        self, temp_sensor_pins, motion_sensor_pin, switch_sensor_pin, onewire_data_pin
+        self,
+        i2c_temp_sensor_pins,
+        motion_sensor_pin,
+        switch_sensor_pin,
+        onewire_ds18b20_pin,
     ):
-        self.temp_sensor_pins = temp_sensor_pins
+        self.i2c_temp_sensor_pins = i2c_temp_sensor_pins
         self.motion_sensor_pin = motion_sensor_pin
         self.switch_sensor_pin = switch_sensor_pin
-        # The missing line - store onewire_data_pin as an instance attribute
-        self.onewire_data_pin = onewire_data_pin
+        # The missing line - store onewire_ds18b20_pin as an instance attribute
+        self.onewire_ds18b20_pin = onewire_ds18b20_pin
 
         self.temp_sensor = None
         self.motion_sensor = None
@@ -50,28 +54,28 @@ class SensorManager:
 
     def _initialize_temp_sensor(self):
         try:
-            self.temp_sensor = BME280Sensor(self.temp_sensor_pins)
+            self.temp_sensor = BME280Sensor(self.i2c_temp_sensor_pins)
             print("Using BME280 sensor.")
             return
         except Exception as e1:
             print(f"BME280 not found: {e1}")
 
         try:
-            self.temp_sensor = SHT31DSensor(self.temp_sensor_pins)
+            self.temp_sensor = SHT31DSensor(self.i2c_temp_sensor_pins)
             print("Using SHT31D sensor.")
             return
         except Exception as e2:
             print(f"SHT31D not found: {e2}")
 
         try:
-            self.temp_sensor = TMP117Sensor(self.temp_sensor_pins)
+            self.temp_sensor = TMP117Sensor(self.i2c_temp_sensor_pins)
             print("Using TMP117 sensor.")
             return
         except Exception as e3:
             print(f"TMP117 not found: {e3}")
 
         try:
-            self.temp_sensor = DS18B20Sensor(self.onewire_data_pin)
+            self.temp_sensor = DS18B20Sensor(self.onewire_ds18b20_pin)
             print("Using DS18B20 sensor.")
             return
         except Exception as e4:

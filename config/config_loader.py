@@ -7,7 +7,9 @@ from utils.logger import Logger
 class ConfigLoader:
 
     def __init__(
-        self, device_id, config_url="http://uterm.local:5000/pico_iot_config.json"
+        self,
+        device_id,
+        config_url="http://192.168.6.79:5000/pico_iot_config.json",
     ):
         """Initialize with device ID and URL."""
         self.device_id = device_id
@@ -15,8 +17,7 @@ class ConfigLoader:
         self.last_timestamp = None
 
         self.logger = Logger.get_instance()
-        self.logger.log(f"config_loader initialized")
-
+        self.logger.log("config_loader initialized")
         self.logger.log(f"ConfigLoader initialized for {device_id}, URL: {config_url}")
 
     def load_config(self):
@@ -56,18 +57,16 @@ class ConfigLoader:
                         final_config.update(all_config["system_global_config"])
 
                     # Add/override with device-specific configuration
-                    self.logger.log(f"Adding device-specific configuration")
+                    self.logger.log("Adding device-specific configuration")
                     final_config.update(device_config)
 
-                    # Ensure moved sensor and OLED settings are present
-                    # Ensure moved sensor and OLED settings are present
+                    # Ensure sensor settings are present
                     device_glob = all_config.get("device_global_config", {})
                     for key in (
-                        "temp_sensor_pins",
+                        "i2c_temp_sensor_pins",
                         "motion_sensor_pin",
                         "switch_sensor_pin",
-                        "oled_config",
-                        "onewire_data_pin",
+                        "onewire_ds18b20_pin",
                     ):
                         if key in device_glob:
                             self.logger.log(
@@ -80,17 +79,20 @@ class ConfigLoader:
                     self.logger.log(
                         f"Device '{self.device_id}' not found in configuration"
                     )
-                    return None
+                    raise RuntimeError(  # <-- raise so caller can reboot
+                        f"Device '{self.device_id}' not found in configuration"
+                    )
             else:
                 self.logger.log(
                     f"Error fetching config file: HTTP status {response.status_code}"
                 )
                 response.close()
-                return None
+                raise RuntimeError(  # <-- raise on bad HTTP status
+                    f"Error fetching config file: HTTP status {response.status_code}"
+                )
 
         except Exception as e:
-            self.logger.log(f"Error loading configuration: {e}")
-            return None
+            raise RuntimeError(f"Error loading configuration: {e}")  # <-- raise
 
     def check_config(self):
         """Periodically check for config changes and reload if modified."""
@@ -135,11 +137,12 @@ class ConfigLoader:
                     f"Error checking config: HTTP status {response.status_code}"
                 )
                 response.close()
-                return None
+                raise RuntimeError(  # <-- raise on bad HTTP status
+                    f"Error checking config: HTTP status {response.status_code}"
+                )
 
         except Exception as e:
-            self.logger.log(f"Error checking configuration: {e}")
-            return None
+            raise RuntimeError(f"Error checking configuration: {e}")  # <-- raise
 
     def _find_device_config(self, all_config):
         """Find device-specific configuration within the loaded data."""

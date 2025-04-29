@@ -12,21 +12,41 @@ from displays.OLED1306Manager import OLED1306Display
 from utils.device_id import get_device_id
 from utils.led_indicator import LEDIndicator
 from utils.logger import Logger
-from utils.fan_controller import FanController
+from utils.fan_pwm_controller import FanPWMController
+from utils.fan_step_controller import FanStepController
+from utils.uptime_tracker import UptimeTracker
+
 
 # --- Main Execution Logic ---
 
+version = "v1.04228025"
+
 
 def run_application():
+
     print("\n################ Starting up ################")
+
+    # Create OLED and attach to logger
+    oled = OLED1306Display()
+
+    if oled.is_initialized():
+        oled.bigline1("Initializing...")
+        oled.bigline2(f"{version}")
+    else:
+        print("OLED failed to initialize")
 
     # Create basic logger immediately (local only initially)
     logger = Logger.get_instance()
+    logger.set_display(oled)
     logger.log("Boot: Logger created")
 
     # Get device ID (needed for both config and logger)
     device_id = get_device_id()
     logger.log(f"Device ID: {device_id}")
+
+    # Initialize uptime tracker
+    uptime_tracker = UptimeTracker()
+    logger.log("Uptime tracker initialized")
 
     # Visual indicator for startup
     led_indicator = LEDIndicator()
@@ -35,20 +55,24 @@ def run_application():
     # Initialize WiFi early - don't wait for config
     # This gets network connectivity established ASAP
     logger.log("Connecting WiFi...")
-    wifi = WiFiManager()
-    if not wifi.connect():
-        logger.log("WiFi failed")
-        raise RuntimeError("WiFi init failed")
-    logger.log("WiFi connected")
+    try:
+        wifi = WiFiManager()
+        if not wifi.connect():
+            raise RuntimeError("WiFi init failed: connection returned False")
+        logger.log("WiFi connected")
+    except Exception as e:
+        raise RuntimeError(f"WiFi init failed: {e}")
 
     # Now load config after WiFi is ready
     config_loader = ConfigLoader(device_id)
     config = config_loader.load_config()
 
-    if config is None:
-        logger.log("FATAL: failed to load configuration, restarting...")
-        time.sleep_ms(5000)
-        machine.reset()
+    try:
+        config = config_loader.load_config()
+        if config is None:
+            raise RuntimeError("Config loading failed: returned None")
+    except Exception as e:
+        raise RuntimeError(f"Config loading failed: {e}")
 
     # Set up device info and remote logging as early as possible
     # This happens right after we have both WiFi and config
@@ -58,22 +82,11 @@ def run_application():
 
     # Now proceed with the rest of the initialization
     # Extract config settings
-    oled_cfg = config["oled_config"]
-    temp_pins = config["temp_sensor_pins"]
+    # oled_cfg = config["oled_config"]
+    temp_pins = config["i2c_temp_sensor_pins"]
     motion_pin = config["motion_sensor_pin"]
     switch_pin = config["switch_sensor_pin"]
-    onewire_data_pin = config["onewire_data_pin"]
-
-    # Create OLED and attach to logger
-    oled = OLED1306Display(oled_cfg)
-    logger.set_display(oled)
-
-    if oled.is_initialized():
-        oled.bigline1("Initializing...")
-    else:
-        logger.log("OLED failed to initialize")
-
-    # Continue with sensor initialization and main loop...
+    onewire_ds18b20_pin = config["onewire_ds18b20_pin"]
 
     try:
         logger.log("Initializing Sensors...")
@@ -81,7 +94,7 @@ def run_application():
             temp_pins,
             motion_pin,
             switch_pin,
-            onewire_data_pin,
+            onewire_ds18b20_pin,
         )
         if not sensor_manager.initialize_sensors():
             raise RuntimeError("Sensor initialization failed")
@@ -114,19 +127,25 @@ def run_application():
             "pressure_inhg": None,
             "motion": "UNKNOWN",
             "switch": "UNKNOWN",
-            "fan_duty": 0,  # Added fan_duty to readings
+            "fan_pwm_duty": 0,
+            "fan_step_active_fans": 0,
+            "version": version,
         }
         logger.log("Enter Loop...")
         time.sleep_ms(1000)
 
-        # Initialize mqtt and fan_controller variables
+        # Initialize mqtt and fan_pwm_controller variables
         mqtt = None
-        fan_controller = None
+        fan_pwm_controller = None
+        fan_step_controller = None
 
         while True:
             try:
                 gc.collect()
                 current_time = time.ticks_ms()
+
+                # Update uptime tracker
+                uptime_tracker.update()
 
                 led_indicator.update()  # Update LED state
 
@@ -192,12 +211,19 @@ def run_application():
                         logger.configure_remote_logging(config)
 
                         # Initialize or reconfigure fan controller
-                        if fan_controller is None:
+                        if fan_pwm_controller is None:
                             logger.log("Initializing fan controller...")
-                            fan_controller = FanController(config)
+                            fan_pwm_controller = FanPWMController(config)
                         else:
                             logger.log("Reconfiguring fan controller...")
-                            fan_controller.configure(config)
+                            fan_pwm_controller.configure(config)
+
+                        if fan_step_controller is None:
+                            logger.log("Initializing fan step controller...")
+                            fan_step_controller = FanStepController(config)
+                        else:
+                            logger.log("Reconfiguring fan step controller...")
+                            fan_step_controller.configure(config)
 
                         last_publish_time = (
                             time.ticks_ms() - heartbeat_publish_period + 2000
@@ -250,24 +276,50 @@ def run_application():
 
                             # Update fan controller with current temperature
                             if (
-                                fan_controller is not None
+                                fan_pwm_controller is not None
                                 and "temperature_c" in temp_data
                             ):
-                                fan_duty = fan_controller.update(
+                                fan_pwm_duty = fan_pwm_controller.update(
                                     temp_data["temperature_c"]
                                 )
                                 # Add fan duty to current readings for MQTT publishing
-                                current_readings["fan_duty"] = fan_duty
+                                current_readings["fan_pwm_duty"] = fan_pwm_duty
+
+                            if (
+                                fan_step_controller is not None
+                                and "temperature_c" in temp_data
+                            ):
+                                fan_step_active_fans = fan_step_controller.update(
+                                    temp_data["temperature_c"]
+                                )
+                                # Add active fans count to current readings for MQTT publishing
+                                current_readings["fan_step_active_fans"] = (
+                                    fan_step_active_fans
+                                )
 
                             # Display temperature on OLED headline
                             if oled.is_initialized():
                                 temp_f = temp_data.get("temperature_f")
                                 fan_info = ""
-                                # if "fan_duty" in current_readings and current_readings["fan_duty"] > 0:
-                                fan_info = f"  Fan:{current_readings['fan_duty']}%"
-                                # logger.log(f"Fan duty: {current_readings['fan_duty']}%")
-                                oled.bigline1(f"T:{temp_f:.1f} F{fan_info}")
-                                oled.bigline2(f"T:{temp_f*5/9:.1f}C")
+
+                                # Show fan information based on which controller is active
+                                if (
+                                    fan_pwm_controller is not None
+                                    and fan_pwm_controller.enabled
+                                    and "fan_pwm_duty" in current_readings
+                                ):
+                                    fan_info = (
+                                        f"  Fan:{current_readings['fan_pwm_duty']}%"
+                                    )
+                                elif (
+                                    fan_step_controller is not None
+                                    and fan_step_controller.enabled
+                                    and "fan_step_active_fans" in current_readings
+                                ):
+                                    fan_info = f"  Fans:{current_readings['fan_step_active_fans']}"
+
+                                oled.bigline1(f"T:{temp_f:.1f}F{fan_info}")
+                                oled.bigline2(f"T:{(temp_f-32)*5/9:.1f}C")
                     last_temperature_check_time = current_time
 
                 # --- Publish Logic (using intervals/periods from config) ---
@@ -298,6 +350,9 @@ def run_application():
                     elif triggered_by_switch:
                         event_type = "switch"
 
+                    # Add uptime from tracker
+                    current_readings["uptime"] = uptime_tracker.get_uptime_string()
+
                     json_payload = mqtt.format_payload(current_readings, event_type)
                     logger.log(f"MQTT event: {event_type}: {json_payload}")
 
@@ -307,7 +362,7 @@ def run_application():
                             if triggered_by_motion:
                                 last_motion_publish_time = current_time
                         else:
-                            logger.log("MQTT publish failed.")
+                            raise RuntimeError("MQTT Publish failed")
                             # Still update timestamps to prevent immediate retries
                             last_publish_time = current_time
                             if triggered_by_motion:
@@ -349,22 +404,21 @@ def run_application():
 
     except Exception as e:
         # Use str(e) for safety, check if led_indicator exists
-        logger.log(f"FATAL error in run_application: {str(e)}")
-        logger.log("Activating error LED pattern (fast blink)...")
-        if led_indicator:  # Check if led_indicator was successfully initialized
-            led_indicator.start(100)  # Fast flash
-        logger.log("Rebooting in 30 seconds...")
-        time.sleep(30)  # Use time.sleep() as time_ms isn't imported
+        logger.log(f"FATAL error: {str(e)}")
+        logger.log("Rebooting in 10 seconds...")
+        time.sleep(10)  # Use time.sleep() as time_ms isn't imported
         machine.reset()
 
     finally:
         # Clean up resources
-        if "fan_controller" in locals() and fan_controller:
-            fan_controller.deinit()
-        # Ensure LED is turned off if loop exits normally (e.g., device disabled)
+        if "fan_pwm_controller" in locals() and fan_pwm_controller:
+            fan_pwm_controller.deinit()
+        if "fan_step_controller" in locals() and fan_step_controller:
+            fan_step_controller.deinit()
+        if "oled" in locals() and oled and oled.is_initialized():
+            oled.deinit()
         if led_indicator:
             led_indicator.stop()
-        logger.log("Application stopped.")
 
 
 if __name__ == "__main__":
@@ -374,6 +428,6 @@ if __name__ == "__main__":
         print("Ctrl+C pressed, exiting.")
     except Exception as e:
         print(f"Critical bootstrap error: {e}")
-        print("Rebooting in 30 seconds...")
-        time.sleep(30)
+        print("Rebooting in 10 seconds...")
+        time.sleep(10)
         machine.reset()

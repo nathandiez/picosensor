@@ -1,10 +1,10 @@
-# utils/fan_controller.py
+# utils/fan_pwm_controller.py
 
 import machine
 from utils.logger import Logger
 
 
-class FanController:
+class FanPWMController:
     """
     A controller class for managing a PWM-driven fan based on temperature readings.
     The fan speed is proportionally controlled between min and max temperature thresholds.
@@ -18,21 +18,12 @@ class FanController:
             config (dict): Configuration dictionary with fan controller settings
         """
         self.logger = Logger.get_instance()
-        self.logger.log("Initializing Fan Controller")
+        self.logger.log("Initializing Fan PWM Controller")
 
         self.enabled = False
         self.pwm = None
         self.current_duty = 0
         self.last_temperature = None
-
-        # Default configuration values
-        self.pwm_pin = 15
-        self.pwm_freq = 1000
-        self.temp_min = 25.0
-        self.temp_max = 35.0
-        self.fan_min_duty = 20
-        self.fan_max_duty = 100
-        self.hysteresis = 1.0
 
         # Configure with provided settings if available
         if config:
@@ -41,13 +32,14 @@ class FanController:
     def configure(self, config):
         """Configure the fan controller with settings from the config dictionary."""
         # Get fan controller config without default
-        fan_config = config.get("fan_controller_config")
+        fan_config = config.get("fan_pwm_controller_config")
         if fan_config is None:
-            raise ValueError("Missing fan_controller_config in configuration")
+            raise ValueError("Missing fan_pwm_controller_config in configuration")
 
         # Validate all required keys are present
         required_keys = [
             "enabled",
+            "manual_override",
             "pwm_pin",
             "pwm_freq",
             "temp_min",
@@ -64,6 +56,9 @@ class FanController:
 
         # Extract configuration values without defaults
         self.enabled = fan_config["enabled"]
+        manual = fan_config["manual_override"]
+        self.manual_override_enabled = manual.get("enabled", False)
+        self.manual_dutycycle = manual.get("manual_dutycycle", 0)
         self.pwm_pin = fan_config["pwm_pin"]
         self.pwm_freq = fan_config["pwm_freq"]
         self.temp_min = fan_config["temp_min"]
@@ -73,7 +68,7 @@ class FanController:
         self.hysteresis = fan_config["hysteresis"]
 
         self.logger.log(
-            f"Fan controller config: enabled={self.enabled}, pin={self.pwm_pin}"
+            f"Fan pwm controller config: enabled={self.enabled}, pin={self.pwm_pin}"
         )
         self.logger.log(f"Temperature range: {self.temp_min}C to {self.temp_max}C")
 
@@ -109,58 +104,45 @@ class FanController:
             return False
 
     def update(self, temperature_c):
-        """
-        Update fan speed based on current temperature.
-
-        Args:
-            temperature_c (float): Current temperature in Celsius
-
-        Returns:
-            int: Current duty cycle (0-100)
-        """
         if not self.enabled or self.pwm is None:
             return 0
 
-        # Store the current temperature
+        # Check for fixed duty override
+        if self.manual_override_enabled:
+            fixed_duty = max(0, min(100, self.manual_dutycycle))
+            if fixed_duty != self.current_duty:
+                self.set_duty(fixed_duty)
+                self.logger.log(f"pwm fan duty manually overridden to {fixed_duty}%")
+            return self.current_duty
+
+        # Proceed with temperature-based control
         self.last_temperature = temperature_c
 
-        # Apply hysteresis to prevent rapid cycling
         if self.current_duty == 0 and temperature_c < (self.temp_min + self.hysteresis):
-            # Keep fan off until temp rises above min + hysteresis
             new_duty = 0
         elif self.current_duty > 0 and temperature_c < (
             self.temp_min - self.hysteresis
         ):
-            # Turn fan off when temp drops below min - hysteresis
             new_duty = 0
         elif temperature_c >= self.temp_max:
-            # Maximum speed at or above max temperature
             new_duty = self.fan_max_duty
         elif temperature_c <= self.temp_min:
-            # Fan off below minimum temperature
             new_duty = 0
         else:
-            # Linear mapping between min and max temperature
             temp_range = self.temp_max - self.temp_min
             temp_factor = (temperature_c - self.temp_min) / temp_range
             duty_range = self.fan_max_duty - self.fan_min_duty
-
-            # Calculate proportional duty cycle and add minimum
             new_duty = int(temp_factor * duty_range) + self.fan_min_duty
 
-        # Only update if duty cycle has changed
         if new_duty != self.current_duty:
             self.set_duty(new_duty)
-            self.logger.log(f"Fan duty: {new_duty}% at temp: {temperature_c}C")
+            self.logger.log(f"Fan pwm duty: {new_duty}% at temp: {temperature_c}C")
 
         return self.current_duty
 
     def set_duty(self, duty_cycle):
         """
-        Set PWM duty cycle.
-
-        Args:
-            duty_cycle (int): Duty cycle as percentage (0-100)
+        Set PWM duty cycle with gamma correction for any perceived nonlinearity
         """
         if not self.enabled or self.pwm is None:
             self.current_duty = 0
@@ -169,8 +151,13 @@ class FanController:
         # Ensure duty cycle is within valid range
         duty_cycle = max(0, min(100, duty_cycle))
 
-        # Convert percentage (0-100) to PWM value (0-65535)
-        pwm_value = int((duty_cycle / 100) * 65535)
+        # Apply gamma correction if needed
+        gamma = 1.0
+        normalized = duty_cycle / 100.0
+        corrected = normalized**gamma
+
+        # Convert to PWM value (0-65535)
+        pwm_value = int(corrected * 65535)
 
         # Set the PWM duty cycle
         self.pwm.duty_u16(pwm_value)

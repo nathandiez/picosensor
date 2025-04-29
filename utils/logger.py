@@ -22,7 +22,7 @@ class Logger:
         self.mqtt_base_topic = "pico-ulog"
 
         self.http_logging_enabled = False
-        self.http_url = "http://uterm.local:5000/terminal"
+        self.http_url = ""
 
         # Always show on serial
         print("Logger initialized")
@@ -51,6 +51,15 @@ class Logger:
             self.http_logging_enabled = False
             return
 
+        # --------------------------------------------------------------
+        # NEW: simple top‑level override pulled from pico_iot_config.json
+        # --------------------------------------------------------------
+        # if "logger_remote_http_url" in config:
+        #     self.http_logging_enabled = True
+        #     self.http_url = config["remote_logger_http_url"]
+        #     print(f"Logger: HTTP logging enabled to {self.http_url}")
+        # --------------------------------------------------------------
+
         # Get remote logger config if it exists
         remote_logger = config.get("remote_logger", {})
 
@@ -62,10 +71,13 @@ class Logger:
             f"Logger: MQTT logging {'enabled' if self.mqtt_logging_enabled else 'disabled'}"
         )
 
-        # Configure HTTP logging
+        # Configure HTTP logging (nested block may override the simple override)
         http_config = remote_logger.get("http", {})
-        self.http_logging_enabled = http_config.get("enabled", False)
-        self.http_url = http_config.get("url", "http://uterm.local:5000/terminal")
+        if http_config:
+            self.http_logging_enabled = http_config.get(
+                "enabled", self.http_logging_enabled
+            )
+            self.http_url = http_config.get("url", self.http_url)
         print(
             f"Logger: HTTP logging {'enabled' if self.http_logging_enabled else 'disabled'} to {self.http_url}"
         )
@@ -99,8 +111,7 @@ class Logger:
 
             return success
         except Exception as e:
-            print(f"Logger: HTTP error: {e}")
-            return False
+            raise RuntimeError(f"Logger: HTTP error: {e}")
 
     def log(self, message):
         # Always print to terminal (full message)
@@ -113,21 +124,21 @@ class Logger:
                 truncated_msg = message[:28]  # Truncate to fit OLED
                 self.display_manager.log(truncated_msg)
             except Exception as e:
-                print(f"Logger: OLED error: {e}")
+                print(f"Logger: Warning - OLED error: {e}")
 
         # MQTT logging (full message)
         if self.mqtt_logging_enabled and self.mqtt_manager is not None:
             try:
                 self.mqtt_manager.publish(self.mqtt_base_topic, formatted_msg)
             except Exception as e:
-                print(f"Logger: MQTT error: {e}")
+                raise RuntimeError(f"Logger: MQTT error: {e}")
 
         # HTTP logging (full message)
         if self.http_logging_enabled:
             try:
                 self.send_http_log(formatted_msg)
             except Exception as e:
-                print(f"Logger: HTTP error: {e}")
+                raise RuntimeError(f"Logger: HTTP error: {e}")
 
     def set_display(self, display_manager):
         self.display_manager = display_manager

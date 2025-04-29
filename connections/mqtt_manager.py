@@ -40,6 +40,10 @@ class MQTTManager:
             f"MQTT Manager initialized for client '{self.client_id}'. Topic: '{self.full_topic}'"
         )
 
+    # ---------------------------------------------------------------------
+    # Connection helpers
+    # ---------------------------------------------------------------------
+
     def connect(self):
         """Attempts to connect to MQTT broker"""
         current_time = time.time()
@@ -59,13 +63,11 @@ class MQTTManager:
         gc.collect()
 
         try:
-            # Get optional parameters, raising errors if not found when required
-            user = self.config["user"] if "user" in self.config else None
-            password = self.config["password"] if "password" in self.config else None
-            ssl = self.config["ssl"] if "ssl" in self.config else False
-            ssl_params = (
-                self.config["ssl_params"] if "ssl_params" in self.config else {}
-            )
+            # Optional parameters
+            user = self.config.get("user")
+            password = self.config.get("password")
+            ssl = self.config.get("ssl", False)
+            ssl_params = self.config.get("ssl_params", {})
 
             self.client = connect_mqtt(
                 client_id=self.client_id,
@@ -80,11 +82,11 @@ class MQTTManager:
         except OSError as e:
             self.logger.log(f"MQTT DNS or Network Error: {e}")
             self.client = None
-            raise  # Re-raise to let caller handle it
+            raise
         except Exception as e:
             self.logger.log(f"Unexpected Error during MQTT connect: {e}")
             self.client = None
-            raise  # Re-raise to let caller handle it
+            raise
 
         if self.client:
             self.logger.log("MQTT Connected Successfully!")
@@ -101,8 +103,12 @@ class MQTTManager:
             return self.connect()
         return True
 
+    # ---------------------------------------------------------------------
+    # Payload helpers
+    # ---------------------------------------------------------------------
+
     def format_payload(self, readings_dict, event_type):
-        """Formats sensor readings with an event type into a JSON payload"""
+        """Formats sensor readings plus extras into a JSON payload"""
         if not event_type:
             raise ValueError("Event type must be specified")
 
@@ -110,7 +116,7 @@ class MQTTManager:
         message["event_type"] = event_type
         message["device_id"] = self.client_id
 
-        # Extract values, don't provide defaults
+        # Extract sensor values
         temp = readings_dict.get("temperature_f")
         humidity = readings_dict.get("humidity")
         pressure = readings_dict.get("pressure_inhg")
@@ -118,76 +124,66 @@ class MQTTManager:
         motion = readings_dict.get("motion")
         switch = readings_dict.get("switch")
 
-        # Process temperature
+        # Temperature
         if temp is not None:
-            if isinstance(temp, (int, float)):
-                message["temperature"] = round(temp, 1)
-            elif isinstance(temp, tuple) and len(temp) > 0:
-                try:
-                    message["temperature"] = round(float(temp[0]), 1)
-                except (ValueError, TypeError) as e:
-                    self.logger.log(f"Error converting temperature: {e}")
-                    message["temperature"] = None
-            else:
-                self.logger.log(f"Invalid temperature type: {type(temp)}")
+            try:
+                message["temperature"] = round(float(temp), 1)
+            except Exception as e:
+                self.logger.log(f"Error converting temperature: {e}")
                 message["temperature"] = None
         else:
             message["temperature"] = None
 
-        # Process humidity
+        # Humidity
         if humidity is not None:
-            if isinstance(humidity, (int, float)):
-                message["humidity"] = round(humidity, 1)
-            elif isinstance(humidity, tuple) and len(humidity) > 0:
-                try:
-                    message["humidity"] = round(float(humidity[0]), 1)
-                except (ValueError, TypeError) as e:
-                    self.logger.log(f"Error converting humidity: {e}")
-                    message["humidity"] = None
-            else:
-                self.logger.log(f"Invalid humidity type: {type(humidity)}")
+            try:
+                message["humidity"] = round(float(humidity), 1)
+            except Exception as e:
+                self.logger.log(f"Error converting humidity: {e}")
                 message["humidity"] = None
         else:
             message["humidity"] = None
 
-        # Process pressure
+        # Pressure
         if pressure is not None:
-            if isinstance(pressure, (int, float)):
-                message["pressure"] = round(pressure, 2)
-            elif isinstance(pressure, tuple) and len(pressure) > 0:
-                try:
-                    message["pressure"] = round(float(pressure[0]), 2)
-                except (ValueError, TypeError) as e:
-                    self.logger.log(f"Error converting pressure: {e}")
-                    message["pressure"] = None
-            else:
-                self.logger.log(f"Invalid pressure type: {type(pressure)}")
+            try:
+                message["pressure"] = round(float(pressure), 2)
+            except Exception as e:
+                self.logger.log(f"Error converting pressure: {e}")
                 message["pressure"] = None
         else:
             message["pressure"] = None
 
-        # Process string values
+        # Strings / enums
         message["temp_sensor_type"] = (
             str(temp_sensor_type) if temp_sensor_type is not None else None
         )
         message["motion"] = str(motion) if motion is not None else None
         message["switch"] = str(switch) if switch is not None else None
 
-        # Add timestamp in UTC (ISO 8601 format)
+        # Timestamp in UTC (ISO 8601)
         try:
             t = time.localtime()
-            message["timestamp"] = "{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}Z".format(
-                t[0], t[1], t[2], t[3], t[4], t[5]
+            message["timestamp"] = (
+                f"{t[0]:04d}-{t[1]:02d}-{t[2]:02d}T{t[3]:02d}:{t[4]:02d}:{t[5]:02d}Z"
             )
         except Exception as e:
             self.logger.log(f"Error generating timestamp: {e}")
-            raise  # Re-raise to let caller handle it
+            raise
+
+        # Extras supplied by caller (e.g., firmware version, uptime seconds)
+        message["version"] = readings_dict.get("version")
+        message["uptime"] = readings_dict.get("uptime")
 
         try:
             return json.dumps(message)
         except Exception as e:
             self.logger.log(f"Error creating JSON: {e}")
-            raise  # Re-raise to let caller handle it
+            raise
+
+    # ---------------------------------------------------------------------
+    # Publishing
+    # ---------------------------------------------------------------------
 
     def publish(self, readings_dict, event_type):
         """Formats and publishes sensor readings with an event type"""
@@ -209,11 +205,13 @@ class MQTTManager:
         except (OSError, MQTTException) as e:
             self.logger.log(f"MQTT publish Error: {e}")
             self.client = None
-            raise  # Re-raise to let caller handle it
+            raise
         except Exception as e:
             self.logger.log(f"MQTT unexpected error during publish: {e}")
             self.client = None
-            raise  # Re-raise to let caller handle it
+            raise
+
+    # ---------------------------------------------------------------------
 
     def disconnect(self):
         if self.client:
@@ -222,5 +220,5 @@ class MQTTManager:
                 self.logger.log("MQTT disconnected.")
             except Exception as e:
                 self.logger.log(f"Error during MQTT disconnect: {e}")
-                raise  # Re-raise to let caller handle it
+                raise
         self.client = None
