@@ -1,0 +1,27 @@
+{
+  "python.languageServer": "Pylance",
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportMissingModuleSource": "none"
+  },
+  "python.terminal.activateEnvironment": false,
+  "micropico.openOnStart": true,
+  "python.analysis.typeshedPaths": [
+    "~/.micropico-stubs/included"
+  ],
+  "python.analysis.extraPaths": [
+    "~/.micropico-stubs/included"
+  ],
+  "workbench.colorCustomizations": {
+    "activityBar.background": "#680015", 
+    "titleBar.activeBackground": "#680015", 
+    "editor.background": "#1e0006", 
+    "sideBar.background": "#1e0006", 
+    "terminal.background":"#1e0006",  
+    "statusBar.background": "#1A2229",
+    "tab.activeBackground": "#2E404F",
+    "tab.inactiveBackground": "#24313A"
+    
+    // Find more tokens here: https://code.visualstudio.com/api/references/theme-color
+  }
+}
