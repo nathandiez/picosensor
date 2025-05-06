@@ -442,7 +442,7 @@ def run_application():
         if led_indicator:
             led_indicator.stop()
         if "api" in locals() and api:
-            api.deinit() 
+            api.deinit()
 
 
 if __name__ == "__main__":
