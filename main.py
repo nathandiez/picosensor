@@ -1,4 +1,5 @@
 # main.py
+
 import machine
 import time
 
@@ -7,16 +8,23 @@ DEV_MODE = True
 # DEV_MODE = False
 
 if DEV_MODE:
-    print("Running in DEVELOPMENT mode - exiting main.py.  Run app.py to start the application.")
-    # Development mode - don't auto-start application
+    print(
+        "Running in DEVELOPMENT mode - exiting main.py.  Run app.py to start the application."
+    )
 else:
     print("Running in PRODUCTION mode - launching application")
-    # Production mode - auto-start application
     try:
-        import app
-        app.run_application()
+        # import your bootstrap and runtime functions
+        from bootstrap import bootstrap
+        from runtime import run_loop
+
+        # initialize everything and enter the main loop
+        state = bootstrap()
+        run_loop(state)
+
     except Exception as e:
         print(f"Application error: {e}")
         print("Rebooting in 30 seconds...")
+        # pause before reset to give you a chance to read the error
         time.sleep_ms(30000)
         machine.reset()
