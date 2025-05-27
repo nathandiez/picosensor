@@ -10,8 +10,8 @@ class WiFiManager:
     def __init__(
         self, time_offset=-4 * 3600
     ):  # To-do is to replace this hardcoded offset with a better solution
-        self.ssid = "Mesh-678"
-        self.password = "DaisyRabbit"
+        self.ssid = "YOUR_WIFI_SSID"
+        self.password = "YOUR_WIFI_PASSWORD"
         self.ntp_host = "time.google.com"  # Changed from "pool.ntp.org"
         self.time_offset = time_offset
         self.wlan = network.WLAN(network.STA_IF)
