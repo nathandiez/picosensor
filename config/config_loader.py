@@ -1,7 +1,8 @@
 # config/config_loader.py
 
 import ujson as json
-import usocket
+import urequests
+import time
 from utils.logger import Logger
 
 
@@ -10,153 +11,121 @@ class ConfigLoader:
     def __init__(
         self,
         device_id,
-        config_url="http://niotv1devstorage.blob.core.windows.net/configs/pico_iot_config.json",
+        config_url="http://192.168.6.131:5000/pico_iot_config.json",
     ):
-        """Initialize with device ID and URL."""
         self.device_id = device_id
         self.config_url = config_url
         self.last_hash = None
 
         self.logger = Logger.get_instance()
-        self.logger.log("config_loader initialized")
-        self.logger.log(f"ConfigLoader initialized for {device_id}, URL: {config_url}")
+        self.logger.log("ConfigLoader initialized")
 
     def load_config(self):
-        """Fetch & parse JSON via HTTP/1.1 socket, then merge into final_config."""
-        try:
-            self.logger.log(f"Fetching configuration from {self.config_url}")
-            # break out host + path
-            url = self.config_url.split("://", 1)[1]
-            host, path = url.split("/", 1) if "/" in url else (url, "")
-            path = "/" + path
+        """Fetch, parse, and process JSON configuration with retries."""
+        self.logger.log(f"Fetching configuration from {self.config_url}")
 
-            # open socket
-            addr = usocket.getaddrinfo(host, 80)[0][-1]
-            s = usocket.socket()
-            s.connect(addr)
-            # send HTTP/1.1 GET
-            s.write(
-                b"GET " + path.encode() + b" HTTP/1.1\r\n"
-                b"Host: " + host.encode() + b"\r\n"
-                b"Connection: close\r\n\r\n"
-            )
+        for attempt in range(3):
+            try:
+                current_response = None
+                all_config_data = None
+                try:
+                    current_response = urequests.get(self.config_url, timeout=5)
+                    if current_response.status_code == 200:
+                        body = current_response.text
+                        if not body:
+                            raise RuntimeError("Empty response body")
+                        all_config_data = json.loads(body)
+                    else:
+                        raise RuntimeError(
+                            f"HTTP error: {current_response.status_code}"
+                        )
+                finally:
+                    if current_response:
+                        current_response.close()
 
-            # check status
-            status = s.readline()
-            if b"200" not in status:
-                s.close()
-                raise RuntimeError(f"HTTP error: {status}")
+                self.logger.log("JSON parsed successfully")
+                return self._process_config(all_config_data)
 
-            # skip headers
-            while True:
-                line = s.readline()
-                if not line or line == b"\r\n":
-                    break
-
-            # read body
-            body = b""
-            while True:
-                chunk = s.read(512)
-                if not chunk:
-                    break
-                body += chunk
-            s.close()
-
-            all_config = json.loads(body)
-            return self._process_config(all_config)
-
-        except Exception as e:
-            raise RuntimeError(f"Error loading configuration: {e}")
+            except Exception as e:
+                self.logger.log(
+                    f"Attempt {attempt + 1} failed: {type(e).__name__}: {e}"
+                )
+                if attempt < 2:
+                    time.sleep(2)
+                else:
+                    raise  # On the last attempt, re-raise the caught exception
 
     def check_config(self):
-        """
-        Check for a changed payload (by simple content hash) and reload if changed.
-        Returns new config dict if it changed, else None.
-        """
+        """Check for config changes via content hash and reload if necessary."""
+        self.logger.log(f"Checking for configuration changes at {self.config_url}")
         try:
-            # Fetch raw bytes same as load_config but only to compare hash
-            url = self.config_url.split("://", 1)[1]
-            host, path = url.split("/", 1) if "/" in url else (url, "")
-            path = "/" + path
+            current_response = None
+            calculated_hash = None
+            try:
+                current_response = urequests.get(self.config_url, timeout=10)
+                if current_response.status_code == 200:
+                    config_bytes = current_response.content
+                    calculated_hash = hash(config_bytes)
+                else:
+                    raise RuntimeError(f"HTTP error: {current_response.status_code}")
+            finally:
+                if current_response:
+                    current_response.close()
 
-            addr = usocket.getaddrinfo(host, 80)[0][-1]
-            s = usocket.socket()
-            s.connect(addr)
-            s.write(
-                b"GET " + path.encode() + b" HTTP/1.1\r\n"
-                b"Host: " + host.encode() + b"\r\n"
-                b"Connection: close\r\n\r\n"
-            )
-
-            # skip status + headers
-            s.readline()
-            while True:
-                line = s.readline()
-                if not line or line == b"\r\n":
-                    break
-
-            # read body
-            body = b""
-            while True:
-                chunk = s.read(512)
-                if not chunk:
-                    break
-                body += chunk
-            s.close()
-
-            new_hash = hash(body)
-            if new_hash != self.last_hash:
+            if calculated_hash != self.last_hash:
                 self.logger.log("Configuration changed; reloading")
-                self.last_hash = new_hash
+                self.last_hash = calculated_hash
                 return self.load_config()
             else:
                 self.logger.log("Configuration unchanged")
                 return None
 
         except Exception as e:
+            self.logger.log(
+                f"Error during configuration check: {type(e).__name__}: {e}"
+            )
             raise RuntimeError(f"Error checking configuration: {e}")
 
     def _process_config(self, all_config):
         """Merge global, system, and device-specific configurations."""
-        # find your device in device_list
         device_list = all_config.get("device_list", [])
         for dev in device_list:
             if dev.get("device_id") == self.device_id:
-                self.logger.log(f"Found device: {dev.get('name','Unnamed')}")
-                self.logger.log(f"Enabled: {dev.get('enabled', 0)}")
+                self.logger.log(
+                    f"Found device: {dev.get('name','Unnamed')}, Enabled: {dev.get('enabled', 0)}"
+                )
                 final = {}
 
-                # global device config
                 if "device_global_config" in all_config:
-                    self.logger.log("Adding global device configuration")
+                    self.logger.log("Adding device_global_config")
                     global_cfg = all_config["device_global_config"]
                     final.update(global_cfg)
                     if "remote_logger" in global_cfg:
-                        self.logger.log("Remote logger configuration found")
+                        self.logger.log(
+                            "Remote logger configuration found in device_global_config"
+                        )
 
-                # system global config
                 if "system_global_config" in all_config:
-                    self.logger.log("Adding system global configuration")
+                    self.logger.log("Adding system_global_config")
                     final.update(all_config["system_global_config"])
 
-                # device-specific
-                self.logger.log("Adding device-specific configuration")
+                self.logger.log("Adding device-specific settings from device_list")
                 final.update(dev)
 
-                # ensure pins
+                # Ensure these specific pin configurations are sourced from device_global_config
+                # This allows global override/definition for these critical pin settings.
                 device_global = all_config.get("device_global_config", {})
-                for key in (
+                pin_keys_to_ensure = (
                     "i2c_temp_sensor_pins",
                     "motion_sensor_pin",
                     "switch_sensor_pin",
                     "onewire_ds18b20_pin",
-                ):
+                )
+                for key in pin_keys_to_ensure:
                     if key in device_global:
-                        self.logger.log(f"Loading '{key}'")
+                        self.logger.log(f"Ensuring '{key}' from device_global_config")
                         final[key] = device_global[key]
-
                 return final
 
-        # not found
-        self.logger.log(f"Device '{self.device_id}' not found")
-        raise RuntimeError(f"Device '{self.device_id}' not found")
+        self.logger.log(f"Device_id '{self.device_id}' not found in device_list")
+        raise RuntimeError(f"Device '{self.device_id}' not found in configuration")

@@ -15,11 +15,10 @@ from utils.logger import Logger
 from utils.uptime_tracker import UptimeTracker
 from runtime import run_loop  # your existing runtime.py
 
-version = "v1.051825"
+version = "v1.053025"
 
 
 def bootstrap():
-    """Initialize hardware, network, config, sensors, trackers, and logger."""
     print("\n################ Starting up ################")
 
     # OLED
