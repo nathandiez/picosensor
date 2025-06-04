@@ -4,8 +4,8 @@ import machine
 import time
 
 # Set to True for development mode, False for production
-DEV_MODE = True
-# DEV_MODE = False
+# DEV_MODE = True
+DEV_MODE = False
 
 if DEV_MODE:
     print(
@@ -15,7 +15,7 @@ else:
     print("Running in PRODUCTION mode - launching application")
     try:
         # import your bootstrap and runtime functions
-        from bootstrap import bootstrap
+        from app import bootstrap
         from runtime import run_loop
 
         # initialize everything and enter the main loop

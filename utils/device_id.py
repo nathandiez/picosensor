@@ -1,6 +1,7 @@
 # utils/device_id.py
 from machine import Pin
 
+
 def get_device_id():
     """
     Read device ID from GPIO pins 0-3 and return a human-readable device ID
@@ -11,9 +12,9 @@ def get_device_id():
         Pin(0, Pin.IN, Pin.PULL_DOWN),  # Bit 0 (LSB)
         Pin(1, Pin.IN, Pin.PULL_DOWN),  # Bit 1
         Pin(2, Pin.IN, Pin.PULL_DOWN),  # Bit 2
-        Pin(3, Pin.IN, Pin.PULL_DOWN)   # Bit 3 (MSB)
+        Pin(3, Pin.IN, Pin.PULL_DOWN),  # Bit 3 (MSB)
     ]
-    
+
     # Calculate the binary value (0-15)
     binary_id = 0
     for i, pin in enumerate(id_pins):
@@ -23,12 +24,12 @@ def get_device_id():
             print(f"Error reading pin {i}: {e}")
             value = 0
         if value:  # Pin is HIGH (connected to 3.3V)
-            binary_id |= (1 << i)
+            binary_id |= 1 << i
 
     # Map binary IDs to locations
     id_map = {
         0: "Office",
-        1: "Kitchen",
+        1: "Exterior",
         2: "Garage",
         3: "MasterBed",
         4: "LivingRoom",
@@ -42,9 +43,9 @@ def get_device_id():
         12: "Hallway",
         13: "DiningRoom",
         14: "Laundry",
-        15: "Spare"
+        15: "Spare",
     }
-    
+
     # Get the location name from the map
     location = id_map.get(binary_id, "Unknown")
 
@@ -54,11 +55,13 @@ def get_device_id():
     # Debug output
     pin_values = [int(pin.value()) for pin in id_pins]
     try:
-        print(f"Device ID pins: {pin_values} (binary: {''.join(str(b) for b in reversed(pin_values))})")
+        print(
+            f"Device ID pins: {pin_values} (binary: {''.join(str(b) for b in reversed(pin_values))})"
+        )
     except Exception as e:
         print(f"Error printing pin values: {e} (values: {pin_values})")
 
     print(f"Numeric ID: {binary_id}")
     # print(f"Device ID: {device_id}")
-    
+
     return device_id

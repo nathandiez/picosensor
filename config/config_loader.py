@@ -11,7 +11,7 @@ class ConfigLoader:
     def __init__(
         self,
         device_id,
-        config_url="http://192.168.6.131:5000/pico_iot_config.json",
+        config_url="http://192.168.6.132:5000/pico_iot_config.json",
     ):
         self.device_id = device_id
         self.config_url = config_url

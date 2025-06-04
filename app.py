@@ -1,5 +1,3 @@
-# app.py
-
 import time
 import machine
 import json
@@ -15,7 +13,7 @@ from utils.logger import Logger
 from utils.uptime_tracker import UptimeTracker
 from runtime import run_loop  # your existing runtime.py
 
-version = "v1.053025"
+version = "v1.060125v3"
 
 
 def bootstrap():
@@ -118,6 +116,7 @@ def bootstrap():
             "temperature_f": None,
             "humidity": None,
             "pressure_inhg": None,
+            "temp_sensor_type": "UNKNOWN",  # Added this line
             "motion": "UNKNOWN",
             "switch": "UNKNOWN",
             "fan_pwm_duty": 0,

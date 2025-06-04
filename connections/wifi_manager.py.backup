@@ -1,5 +1,4 @@
 # wifi_manager.py
-from secrets import WIFI_SSID, WIFI_PASSWORD
 
 import network
 import time
@@ -11,8 +10,8 @@ class WiFiManager:
     def __init__(
         self, time_offset=-4 * 3600
     ):  # To-do is to replace this hardcoded offset with a better solution
-        self.ssid = WIFI_SSID
-        self.password = WIFI_PASSWORD
+        self.ssid = "Mesh-678"
+        self.password = "DaisyRabbit"
         self.ntp_host = "time.google.com"  # Changed from "pool.ntp.org"
         self.time_offset = time_offset
         self.wlan = network.WLAN(network.STA_IF)

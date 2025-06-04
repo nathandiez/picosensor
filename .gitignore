@@ -1,0 +1,25 @@
+# Secrets and credentials
+secrets.py
+config_local.py
+wifi_credentials.py
+.env
+*.secret
+
+# Logs and runtime files
+*.log
+logs/
+device_id.txt
+local_config.json
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,5 +1,3 @@
-# utils/payload_formatter.py
-
 import time
 import json
 from collections import OrderedDict
@@ -27,6 +25,9 @@ class PayloadFormatter:
 
         msg["motion"] = str(readings.get("motion"))
         msg["switch"] = str(readings.get("switch"))
+
+        # Add sensor_type field
+        msg["sensor_type"] = readings.get("temp_sensor_type", "UNKNOWN")
 
         # New fields
         msg["wifi_rssi"] = readings.get("wifi_rssi")
@@ -59,6 +60,8 @@ class PayloadFormatter:
                 if readings.get("temperature_f") is not None
                 else None
             ),
+            # Add sensor_type to API payload as well
+            "sensor_type": readings.get("temp_sensor_type", "UNKNOWN"),
             # include extras if you want them in API too
             "wifi_rssi": readings.get("wifi_rssi"),
             "uptime_seconds": readings.get("uptime_seconds"),
